@@ -32,6 +32,7 @@ library
       src
   build-depends:
       base >=4.7 && <5
+    , megaparsec
   default-language: Haskell2010
 
 executable hlox-exe
@@ -44,6 +45,7 @@ executable hlox-exe
   build-depends:
       base >=4.7 && <5
     , hlox
+    , megaparsec
   default-language: Haskell2010
 
 test-suite hlox-test
@@ -57,4 +59,5 @@ test-suite hlox-test
   build-depends:
       base >=4.7 && <5
     , hlox
+    , megaparsec
   default-language: Haskell2010
