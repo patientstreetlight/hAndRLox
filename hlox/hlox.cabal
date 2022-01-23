@@ -25,6 +25,7 @@ source-repository head
 
 library
   exposed-modules:
+      Expr
       Lib
   other-modules:
       Paths_hlox
