@@ -1,5 +1,6 @@
 module Token where
 
+import Data.Text (Text)
 
 data Token
     -- Single-character tokens
@@ -26,8 +27,8 @@ data Token
     | LessEqual
 
     -- Literals
-    | Identifier String
-    | String String
+    | Identifier Text
+    | String Text
     | Number Double
 
     -- Keywords
@@ -49,3 +50,13 @@ data Token
     | While
 
     | Eof
+    deriving Show
+
+
+-- A token combined with some debug information to better report errors
+-- back to the user.
+data DebugToken = DebugToken
+    { token :: Token
+    , lexeme :: Text
+    , line :: Int
+    }
