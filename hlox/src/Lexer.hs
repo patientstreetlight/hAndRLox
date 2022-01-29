@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Lexer2 where
+module Lexer (lexLox) where
 
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -21,19 +21,27 @@ data LexState = LexState
     , currentTokenSize :: Int
     , currentLine :: Int
     , tokensReversed :: [DebugToken]
+    , errors :: [LexError]
     }
 
 initState :: Text -> LexState
-initState input = LexState input 0 1 []
+initState input = LexState input 0 1 [] []
 
--- Lexer =~ LexState -> Either LexError (a, LexState)
-type Lexer a = StateT LexState (Either LexError) a
+type Lexer a = State LexState a
 
--- XXX this is wrong
+lexLox :: Text -> Either [LexError] [DebugToken]
+lexLox input = evalState scanTokens (initState input)
+
 isAtEnd :: Lexer Bool
-isAtEnd = gets $ T.null . input
+isAtEnd = do
+    s <- get
+    let current = currentTokenSize s
+        source = input s
+    return $ case T.compareLength source current of
+        GT -> False
+        _  -> True
 
-scanTokens :: Lexer [DebugToken]
+scanTokens :: Lexer (Either [LexError] [DebugToken])
 scanTokens = do
     let loop = do
         done <- isAtEnd
@@ -41,7 +49,10 @@ scanTokens = do
             scanToken
             loop
     loop
-    gets $ reverse . tokensReversed
+    s <- get
+    let errs = errors s
+        toks = reverse $ tokensReversed s
+    return $ if null errs then Right toks else Left errs
 
 advance :: Lexer Char
 advance = do
