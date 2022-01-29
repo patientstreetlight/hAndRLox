@@ -44,10 +44,10 @@ isAtEnd = do
 scanTokens :: Lexer (Either [LexError] [DebugToken])
 scanTokens = do
     let loop = do
-        done <- isAtEnd
-        unless done $ do
-            scanToken
-            loop
+            done <- isAtEnd
+            unless done $ do
+                scanToken
+                loop
     loop
     s <- get
     let errs = errors s
@@ -105,28 +105,28 @@ peek = do
 string :: Lexer ()
 string = do
     let loop = do
-        p <- peek
-        case p of
-            Nothing -> return () -- XXX Should be unterminated string error
-            Just '"' -> void advance
-            Just c -> do
-                when (c == '\n') $ do
-                    s <- get
-                    put $ s { currentLine = currentLine s + 1 }
-                advance
-                loop
+            p <- peek
+            case p of
+                Nothing -> return () -- XXX Should be unterminated string error
+                Just '"' -> void advance
+                Just c -> do
+                    when (c == '\n') $ do
+                        s <- get
+                        put $ s { currentLine = currentLine s + 1 }
+                    advance
+                    loop
     loop
     addTokenWith (String . T.init . T.tail)
 
 number :: Lexer ()
 number = do
     let eatDigits = do
-        p <- peek
-        case p of
-            Just c | isDigit c -> do
-                advance
-                eatDigits
-            _ -> return ()
+            p <- peek
+            case p of
+                Just c | isDigit c -> do
+                    advance
+                    eatDigits
+                _ -> return ()
     eatDigits
     -- The next character is not a digit, but it might be a '.' before a fractional part.
     p <- peek2
@@ -176,10 +176,10 @@ scanToken = do
             matchSlash <- match '/'
             if matchSlash then do
                 let loop = do
-                    p <- peek
-                    when (p /= Just '\n') $ do
-                        advance
-                        loop
+                        p <- peek
+                        when (p /= Just '\n') $ do
+                            advance
+                            loop
                 loop
             else
                 addToken Slash
@@ -199,12 +199,12 @@ scanToken = do
 identifier :: Lexer ()
 identifier = do
     let loop = do
-        p <- peek
-        case p of
-            Just c | isAlphaNum c -> do
-                advance
-                loop
-            _ -> return ()
+            p <- peek
+            case p of
+                Just c | isAlphaNum c -> do
+                    advance
+                    loop
+                _ -> return ()
     loop
     addTokenWith toIdentifierOrKeyword
 

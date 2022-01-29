@@ -2,4 +2,4 @@ module Main where
 
 
 main :: IO ()
-main = undefined
+main = putStrLn "hello"

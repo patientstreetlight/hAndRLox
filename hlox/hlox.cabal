@@ -27,7 +27,6 @@ library
   exposed-modules:
       Expr
       Lexer
-      Lexer2
       Parser
       Token
   other-modules:
