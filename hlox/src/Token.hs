@@ -59,4 +59,4 @@ data DebugToken = DebugToken
     { token :: Token
     , lexeme :: Text
     , line :: Int
-    }
+    } deriving Show

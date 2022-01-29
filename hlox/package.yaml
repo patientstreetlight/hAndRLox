@@ -37,6 +37,7 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - hlox
+    - haskeline
 
 tests:
   hlox-test:

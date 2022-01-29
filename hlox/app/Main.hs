@@ -2,6 +2,10 @@ module Main where
 
 import System.Environment (getArgs)
 import System.Exit (die)
+import System.Console.Haskeline
+import Lexer (lexLox)
+import qualified Data.Text as T
+import Token (token)
 
 main :: IO ()
 main = do
@@ -13,10 +17,17 @@ main = do
 
 
 runPrompt :: IO ()
-runPrompt = do
-    putStr "> "
-    -- XXX more here
-
+runPrompt = runInputT defaultSettings loop
+  where
+    loop :: InputT IO ()
+    loop = do
+        minput <- getInputLine "> "
+        case minput of
+            Nothing -> return ()
+            Just "quit" -> return()
+            Just input -> do
+                outputStrLn $ show $ fmap (map token) $ lexLox $ T.pack input
+                loop
 
 runFile :: String -> IO ()
 runFile fileName = do

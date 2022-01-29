@@ -14,6 +14,7 @@ data LexError
     = UnexpectedEof
     | UnterminatedString
     | UnexpectedCharacter Char
+    deriving Show
 
 
 data LexState = LexState
