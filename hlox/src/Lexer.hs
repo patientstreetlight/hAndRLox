@@ -178,9 +178,11 @@ scanToken = do
             if matchSlash then do
                 let loop = do
                         p <- peek
-                        when (p /= Just '\n') $ do
-                            advance
-                            loop
+                        case p of
+                            Just c | c /= '\n' -> do
+                                advance
+                                loop
+                            _ -> return ()
                 loop
             else
                 addToken Slash
