@@ -50,13 +50,13 @@ data Token
     | While
 
     | Eof
-    deriving Show
+    deriving (Show, Eq)
 
 
 -- A token combined with some debug information to better report errors
 -- back to the user.
 data DebugToken = DebugToken
-    { token :: Token
-    , lexeme :: Text
-    , line :: Int
+    { dtToken :: Token
+    , dtLexeme :: Text
+    , dtLine :: Int
     } deriving Show

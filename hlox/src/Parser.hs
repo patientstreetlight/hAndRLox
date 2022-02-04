@@ -1,3 +1,166 @@
-module Parser where
+{-# LANGUAGE LambdaCase #-}
 
+module Parser where
+import Token
+import qualified Token as T
+import Control.Applicative
+import Data.List (foldl')
+import Expr
+import qualified Expr as E
+import Data.Foldable (asum)
+
+
+newtype Parser a = Parser { runParser :: [Token] -> [(a, [Token])] }
+
+-- XXX better errors
+parseLox :: [Token] -> Expr
+parseLox tokens = 
+    case runParser loxFile tokens of
+        [] -> error "parse failure"
+        [(parsed, [])] -> parsed
+        [(parsed, _)] -> error "unconsumed input"
+        xs -> error $ "ambiguous parse: " ++ show xs
+
+loxFile :: Parser Expr
+loxFile = expression <* eof
+
+eof :: Parser ()
+eof =
+    Parser $ \case
+        [] -> [((), [])]
+        _ -> empty
+
+satisfies :: (Token -> Bool) -> Parser Token
+satisfies p =
+    Parser $ \case
+        t : ts | p t -> [ (t, ts) ]
+        _ -> []
+
+token :: Token -> Parser Token
+token t = satisfies (== t)
+
+pluck :: (Token -> Maybe a) -> Parser a
+pluck f =
+    Parser $ \case
+        [] -> []
+        t : ts -> case f t of
+            Nothing -> []
+            Just a -> [(a, ts)]
+
+instance Functor Parser where
+    fmap f (Parser p) =
+        Parser $ \tokens ->
+            [ (f a, ts)
+            | (a, ts) <- p tokens
+            ]
+
+
+instance Applicative Parser where
+    pure a =
+        Parser $ \tokens -> [(a, tokens)]
+
+    Parser pF <*> Parser pA =
+        Parser $ \tokens ->
+            [ (f a, ts')
+            | (f, ts) <- pF tokens
+            , (a, ts') <- pA ts
+            ]
+
+
+instance Alternative Parser where
+    empty = Parser $ const []
+    Parser pA <|> Parser pB =
+        Parser $ \tokens -> pA tokens ++ pB tokens
+
+
+sepBy1 :: Parser a -> Parser b -> Parser [a]
+p `sepBy1` sep = (:) <$> p <*> many (sep *> p)
+
+sepBy :: Parser a -> Parser b -> Parser [a]
+p `sepBy` sep = (p `sepBy1` sep) <|> pure []
+
+
+chainl1 :: Parser a -> Parser (a -> a -> a) -> Parser a
+p `chainl1` op = foldl' applyOp <$> p <*> many ((,) <$> op <*> p)
+  where
+    applyOp acc (f, rhs) = f acc rhs
+
+
+chainr1 :: Parser a -> Parser (a -> a -> a) -> Parser a
+p `chainr1` op = foo <$> p <*> many ((,) <$> op <*> p)
+  where
+    foo :: b -> [(b -> b -> b, b)] -> b
+    foo x rest =
+        let (rest', x') = shift x rest
+        in foldr applyOp x' rest'
+    applyOp (lhs, f) acc = f lhs acc
+
+shift :: a -> [(a -> a -> a, a)] -> ([(a, a -> a -> a)], a)
+shift = go []
+  where
+    go acc x [] = (acc, x)
+    go acc x ((f, y) : rest) = go ((x, f) : acc) y rest
+
+
+choice :: [Parser a] -> Parser a
+choice = asum
+
+expression :: Parser Expr
+expression = equality
+
+equality :: Parser Expr
+equality = comparison `chainl1` eqOperator
+  where
+    eqOperator = choice
+        [ Binary Equals <$ token EqualEqual
+        , Binary NotEquals <$ token BangEqual
+        ]
+
+comparison :: Parser Expr
+comparison = term `chainl1` compOperator
+  where
+    compOperator = choice
+        [ Binary LessThan <$ token Less
+        , Binary LessThanEquals <$ token LessEqual
+        , Binary GreaterThan <$ token Greater
+        , Binary GreaterThanEquals <$ token GreaterEqual
+        ]
+
+term :: Parser Expr
+term = factor `chainl1` addOp
+  where
+    addOp = choice
+        [ Binary Add <$ token Plus
+        , Binary Sub <$ token Minus
+        ]
+
+factor :: Parser Expr
+factor = unary `chainl1` mulOp
+  where
+    mulOp = choice
+        [ Binary Mult <$ token Star
+        , Binary Divide <$ token Slash
+        ]
+
+unary :: Parser Expr
+unary = choice
+    [ Unary Negate <$ token Minus <*> unary
+    , Unary Not <$ token Bang <*> unary
+    , primary
+    ]
+
+primary :: Parser Expr
+primary = (E.Literal <$> literal) <|> parens expression
+
+parens :: Parser a -> Parser a
+parens p = token LeftParen *> p <* token RightParen
+
+literal :: Parser Literal
+literal = pluck $ \case
+    T.Number n -> Just $ E.Number n
+    T.String s -> Just $ E.String s
+    TokFalse -> Just $ E.Bool False
+    TokTrue -> Just $ E.Bool True
+    T.Nil -> Just E.Nil
+    _ -> Nothing 
 

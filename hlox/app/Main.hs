@@ -5,7 +5,7 @@ import System.Exit (die)
 import System.Console.Haskeline
 import Lexer (lexLox)
 import qualified Data.Text as T
-import Token (token)
+import Token (dtToken)
 
 main :: IO ()
 main = do
@@ -26,7 +26,7 @@ runPrompt = runInputT defaultSettings loop
             Nothing -> return ()
             Just "quit" -> return()
             Just input -> do
-                outputStrLn $ show $ fmap (map token) $ lexLox $ T.pack input
+                outputStrLn $ show $ fmap (map dtToken) $ lexLox $ T.pack input
                 loop
 
 runFile :: String -> IO ()
