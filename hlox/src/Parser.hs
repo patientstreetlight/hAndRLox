@@ -5,8 +5,8 @@ import Token
 import qualified Token as T
 import Control.Applicative
 import Data.List (foldl')
-import Expr
-import qualified Expr as E
+import AST
+import qualified AST as E
 import Data.Foldable (asum)
 import Value
 import qualified Value as V

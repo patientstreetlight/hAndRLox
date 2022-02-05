@@ -1,4 +1,4 @@
-module Expr where
+module AST where
 
 import Data.Text
 import Value

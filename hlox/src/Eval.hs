@@ -1,7 +1,7 @@
 module Eval where
 
 import Value
-import Expr
+import AST
 
 
 eval :: Expr -> Value
