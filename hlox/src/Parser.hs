@@ -8,6 +8,8 @@ import Data.List (foldl')
 import Expr
 import qualified Expr as E
 import Data.Foldable (asum)
+import Value
+import qualified Value as V
 
 
 newtype Parser a = Parser { runParser :: [Token] -> [(a, [Token])] }
@@ -155,12 +157,12 @@ primary = (E.Literal <$> literal) <|> parens expression
 parens :: Parser a -> Parser a
 parens p = token LeftParen *> p <* token RightParen
 
-literal :: Parser Literal
+literal :: Parser Value
 literal = pluck $ \case
-    T.Number n -> Just $ E.Number n
-    T.String s -> Just $ E.String s
-    TokFalse -> Just $ E.Bool False
-    TokTrue -> Just $ E.Bool True
-    T.Nil -> Just E.Nil
+    T.Number n -> Just $ V.Number n
+    T.String s -> Just $ V.String s
+    TokFalse -> Just $ V.Bool False
+    TokTrue -> Just $ V.Bool True
+    T.Nil -> Just V.Nil
     _ -> Nothing 
 

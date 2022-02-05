@@ -25,10 +25,12 @@ source-repository head
 
 library
   exposed-modules:
+      Eval
       Expr
       Lexer
       Parser
       Token
+      Value
   other-modules:
       Paths_hlox
   hs-source-dirs:

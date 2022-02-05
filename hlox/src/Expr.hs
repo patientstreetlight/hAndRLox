@@ -1,20 +1,13 @@
 module Expr where
 
 import Data.Text
+import Value
 
 data Expr
-    = Literal Literal
+    = Literal Value
     | Unary UnaryOp Expr
     | Binary BinaryOp Expr Expr
     | Grouping Expr
-    deriving Show
-
-
-data Literal
-    = Number Double
-    | String Text
-    | Bool Bool
-    | Nil
     deriving Show
 
 
