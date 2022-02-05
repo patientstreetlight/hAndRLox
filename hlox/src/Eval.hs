@@ -9,6 +9,7 @@ eval e = case e of
     Literal v -> v
     Unary op e' -> unary op $ eval e'
     Binary op l r -> binary op (eval l) (eval r)
+    Grouping e' -> eval e'
 
 
 unary :: UnaryOp -> Value -> Value
