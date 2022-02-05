@@ -15,7 +15,7 @@ import qualified Value as V
 newtype Parser a = Parser { runParser :: [Token] -> [(a, [Token])] }
 
 -- XXX better errors
-parseLox :: [Token] -> Expr
+parseLox :: [Token] -> [Stmt]
 parseLox tokens = 
     case runParser loxFile tokens of
         [] -> error "parse failure"
@@ -23,8 +23,14 @@ parseLox tokens =
         [(parsed, _)] -> error "unconsumed input"
         xs -> error $ "ambiguous parse: " ++ show xs
 
-loxFile :: Parser Expr
-loxFile = expression <* eof
+loxFile :: Parser [Stmt]
+loxFile = many stmt <* eof
+
+stmt :: Parser Stmt
+stmt = choice
+    [ E.Print <$ token T.Print <*> expression <* token T.Semicolon
+    , E.Expr <$> expression <* token T.Semicolon
+    ]
 
 eof :: Parser ()
 eof =

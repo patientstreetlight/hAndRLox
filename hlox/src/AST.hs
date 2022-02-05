@@ -3,6 +3,12 @@ module AST where
 import Data.Text
 import Value
 
+data Stmt
+    = Expr Expr
+    | Print Expr
+    deriving Show
+
+
 data Expr
     = Literal Value
     | Unary UnaryOp Expr

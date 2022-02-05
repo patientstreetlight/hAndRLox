@@ -3,6 +3,13 @@ module Eval where
 import Value
 import AST
 
+runProgram :: [Stmt] -> IO ()
+runProgram = mapM_ exec
+
+exec :: Stmt -> IO ()
+exec s = case s of
+    Print e -> print $ eval e
+    _ -> return ()
 
 eval :: Expr -> Value
 eval e = case e of
