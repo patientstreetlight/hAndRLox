@@ -10,13 +10,14 @@ import qualified AST as E
 import Data.Foldable (asum)
 import Value
 import qualified Value as V
+import Data.Text (Text)
 
 
 newtype Parser a = Parser { runParser :: [Token] -> [(a, [Token])] }
 
 -- XXX better errors
 parseLox :: [Token] -> [Stmt]
-parseLox tokens = 
+parseLox tokens =
     case runParser loxFile tokens of
         [] -> error "parse failure"
         [(parsed, [])] -> parsed
@@ -24,12 +25,22 @@ parseLox tokens =
         xs -> error $ "ambiguous parse: " ++ show xs
 
 loxFile :: Parser [Stmt]
-loxFile = many stmt <* eof
+loxFile = many declaration <* eof
+
+declaration :: Parser Stmt
+declaration = varDecl <|> stmt
+
+varDecl :: Parser Stmt
+varDecl = Decl <$ token Var <*> identifier <*> optional (token T.Equal *> expression) <* semicolon
+
+semicolon :: Parser Token
+semicolon = token T.Semicolon
 
 stmt :: Parser Stmt
 stmt = choice
-    [ E.Print <$ token T.Print <*> expression <* token T.Semicolon
-    , E.Expr <$> expression <* token T.Semicolon
+    [ E.Print <$ token T.Print <*> expression <* semicolon
+    , E.Block <$ token T.LeftBrace <*> (many declaration <* token T.RightBrace)
+    , E.Expr <$> expression <* semicolon
     ]
 
 eof :: Parser ()
@@ -114,7 +125,15 @@ choice :: [Parser a] -> Parser a
 choice = asum
 
 expression :: Parser Expr
-expression = equality
+expression = assignment
+
+assignment :: Parser Expr
+assignment = equality `chainr1` (assign <$ token T.Equal)
+
+assign :: Expr -> Expr -> Expr
+assign l r = case l of
+    E.Identifier i -> Assign i r
+    _ -> error "Invalid assignment target"
 
 equality :: Parser Expr
 equality = comparison `chainl1` eqOperator
@@ -158,10 +177,10 @@ unary = choice
     ]
 
 primary :: Parser Expr
-primary = (E.Literal <$> literal) <|> parens expression
+primary = (E.Literal <$> literal) <|> (E.Identifier <$> identifier) <|> parens
 
-parens :: Parser a -> Parser a
-parens p = token LeftParen *> p <* token RightParen
+parens :: Parser Expr
+parens = (Grouping <$ token LeftParen) <*> expression <* token RightParen
 
 literal :: Parser Value
 literal = pluck $ \case
@@ -170,5 +189,9 @@ literal = pluck $ \case
     TokFalse -> Just $ V.Bool False
     TokTrue -> Just $ V.Bool True
     T.Nil -> Just V.Nil
-    _ -> Nothing 
+    _ -> Nothing
 
+identifier :: Parser Text
+identifier = pluck $ \case
+    T.Identifier t -> Just t
+    _ -> Nothing

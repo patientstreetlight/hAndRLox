@@ -1,22 +1,55 @@
+{-# LANGUAGE GeneralisedNewtypeDeriving #-}
+
 module Eval where
 
 import Value
 import AST
+import Env (Env, newNestedEnv, newRootEnv)
+import qualified Env as E
+import Control.Monad.State
+import Data.Maybe (fromMaybe)
+
+
+newtype Lox a = Lox
+    { runLox :: StateT Env IO a
+    } deriving (Functor, Applicative, Monad, MonadState Env, MonadIO)
+
+execLox :: Lox a -> IO ()
+execLox lox = void $ execStateT (runLox lox) newRootEnv
 
 runProgram :: [Stmt] -> IO ()
-runProgram = mapM_ exec
+runProgram stmts = execLox (mapM_ exec stmts)
 
-exec :: Stmt -> IO ()
+exec :: Stmt -> Lox ()
 exec s = case s of
-    Print e -> print $ eval e
-    _ -> return ()
+    Print e -> do
+        val <- eval e
+        liftIO $ print val
+    Expr e -> void $ eval e
+    Decl var mInitExpr -> do
+        val <- case mInitExpr of
+            Nothing -> return Nil
+            Just e -> eval e
+        modify $ E.define var val
+    Block stmts -> do
+        env <- get
+        let nestedEnv = newNestedEnv env
+        put nestedEnv
+        mapM_ exec stmts
+        mEnv' <- gets E.parent
+        maybe (error "nested env somehow had no parent") put mEnv'
 
-eval :: Expr -> Value
+eval :: Expr -> Lox Value
 eval e = case e of
-    Literal v -> v
-    Unary op e' -> unary op $ eval e'
-    Binary op l r -> binary op (eval l) (eval r)
+    Literal v -> return v
+    Unary op e' -> unary op <$> eval e'
+    Binary op l r -> binary op <$> eval l <*> eval r
     Grouping e' -> eval e'
+    Identifier var -> gets $ E.get var
+    Assign var e' -> do
+        val <- eval e'
+        modify $ E.set var val
+        return val
 
 
 unary :: UnaryOp -> Value -> Value
