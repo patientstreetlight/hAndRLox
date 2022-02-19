@@ -12,7 +12,9 @@ import Data.IORef
 import Data.Text (Text)
 import qualified Data.Text as T
 
-type LoxEnv = Env Text (IORef Value)
+type Cell = IORef Value
+
+type LoxEnv = Env Text Cell
 
 newtype Lox a = Lox
     { runLox :: StateT LoxEnv IO a
@@ -58,7 +60,7 @@ eval e = case e of
         liftIO $ writeIORef cell val
         return val
 
-resolve :: Text -> Lox (IORef Value)
+resolve :: Text -> Lox Cell
 resolve var = do
     mVal <- gets $ E.resolve var
     case mVal of
