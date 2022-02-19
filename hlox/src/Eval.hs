@@ -10,6 +10,7 @@ import Control.Monad.State
 import Data.Maybe (fromMaybe)
 import Data.IORef
 import Data.Text (Text)
+import qualified Data.Text as T
 
 type LoxEnv = Env Text (IORef Value)
 
@@ -48,12 +49,21 @@ eval e = case e of
     Unary op e' -> unary op <$> eval e'
     Binary op l r -> binary op <$> eval l <*> eval r
     Grouping e' -> eval e'
-    Identifier var -> gets $ E.get var
+    Identifier var -> do
+        cell <- resolve var
+        liftIO $ readIORef cell
     Assign var e' -> do
+        cell <- resolve var
         val <- eval e'
-        modify $ E.set var val
+        liftIO $ writeIORef cell val
         return val
 
+resolve :: Text -> Lox (IORef Value)
+resolve var = do
+    mVal <- gets $ E.resolve var
+    case mVal of
+        Just val -> return val
+        Nothing -> error $ "undefined variable: " ++ T.unpack var
 
 unary :: UnaryOp -> Value -> Value
 unary op = case op of
