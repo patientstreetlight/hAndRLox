@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralisedNewtypeDeriving #-}
+{-# LANGUAGE GeneralisedNewtypeDeriving, LambdaCase #-}
 
 module Eval where
 
@@ -44,6 +44,25 @@ exec s = case s of
         put nestedEnv
         mapM_ exec stmts
         put env
+    If condition thenBranch mElseBranch -> do
+        c <- eval condition
+        if truthy c then
+            exec thenBranch
+        else
+            forM_ mElseBranch exec
+    While condition loopBody -> do
+        let loop = do
+                c <- eval condition
+                when (truthy c) $ do
+                    exec loopBody
+                    loop
+        loop
+
+truthy :: Value -> Bool
+truthy = \case
+    Nil -> False
+    Bool False -> False
+    _ -> True
 
 eval :: Expr -> Lox Value
 eval e = case e of
@@ -98,6 +117,8 @@ binary op a b = case op of
     Sub -> arithmetic (-) a b
     Mult -> arithmetic (*) a b
     Divide -> arithmetic (/) a b
+    And -> if truthy a then b else a
+    Or -> if truthy a then a else b
 
 
 cmp :: (Double -> Double -> Bool) -> Value -> Value -> Value

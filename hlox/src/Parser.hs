@@ -11,6 +11,7 @@ import Data.Foldable (asum)
 import Value
 import qualified Value as V
 import Data.Text (Text)
+import Data.Maybe (fromMaybe)
 
 
 newtype Parser a = Parser { runParser :: [Token] -> [(a, [Token])] }
@@ -31,7 +32,11 @@ declaration :: Parser Stmt
 declaration = varDecl <|> stmt
 
 varDecl :: Parser Stmt
-varDecl = Decl <$ token Var <*> identifier <*> optional (token T.Equal *> expression) <* semicolon
+varDecl = var <* semicolon
+
+-- a variable declation _without_ a trailing semicolon
+var :: Parser Stmt
+var = Decl <$ token Var <*> identifier <*> optional (token T.Equal *> expression)
 
 semicolon :: Parser Token
 semicolon = token T.Semicolon
@@ -40,8 +45,40 @@ stmt :: Parser Stmt
 stmt = choice
     [ E.Print <$ token T.Print <*> expression <* semicolon
     , E.Block <$ token T.LeftBrace <*> (many declaration <* token T.RightBrace)
+    , E.If <$ token T.If <*>
+          (token T.LeftParen *> expression <* token T.RightParen) <*>
+          stmt <*>
+          optional (token T.Else *> stmt)
+    , E.While <$ token T.While <*>
+          (token T.LeftParen *> expression <* token T.RightParen) <*>
+          stmt
+    , forStmt
     , E.Expr <$> expression <* semicolon
     ]
+
+forStmt :: Parser Stmt
+forStmt = mkForLoop <$ token T.For <*>
+    (token T.LeftParen *> optional init <* semicolon) <*>
+    (optional expression <* semicolon) <*>
+    (optional expression <* token T.RightParen) <*>
+    stmt
+  where
+    init = var <|> (E.Expr <$> expression)
+    mkForLoop :: Maybe Stmt -> Maybe Expr -> Maybe Expr -> Stmt -> Stmt
+    mkForLoop mInitializer mCondition mIncrement loopBody = forLoop
+      where
+        condition = fromMaybe (E.Literal $ Bool True) mCondition
+        loopBodyWithIncrement =
+            case mIncrement of
+                Nothing -> loopBody
+                Just increment -> E.Block
+                    [ loopBody
+                    , E.Expr increment
+                    ]
+        whileLoop = E.While condition loopBodyWithIncrement
+        forLoop = case mInitializer of
+            Nothing -> whileLoop
+            Just initializer -> E.Block [ initializer, whileLoop ]
 
 eof :: Parser ()
 eof =
@@ -128,12 +165,18 @@ expression :: Parser Expr
 expression = assignment
 
 assignment :: Parser Expr
-assignment = equality `chainr1` (assign <$ token T.Equal)
+assignment = logicOr `chainr1` (assign <$ token T.Equal)
 
 assign :: Expr -> Expr -> Expr
 assign l r = case l of
     E.Identifier i -> Assign i r
     _ -> error "Invalid assignment target"
+
+logicOr :: Parser Expr
+logicOr = logicAnd `chainr1` (E.Binary E.Or <$ token T.Or)
+
+logicAnd :: Parser Expr
+logicAnd = equality `chainr1` (E.Binary E.And <$ token T.And)
 
 equality :: Parser Expr
 equality = comparison `chainl1` eqOperator

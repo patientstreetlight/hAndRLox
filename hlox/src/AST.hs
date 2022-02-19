@@ -9,6 +9,8 @@ data Stmt
     | Print Expr
     | Decl Text (Maybe Expr)
     | Block [Stmt]
+    | If Expr Stmt (Maybe Stmt)
+    | While Expr Stmt
     deriving Show
 
 
@@ -39,4 +41,6 @@ data BinaryOp
     | Sub
     | Mult
     | Divide
+    | And
+    | Or
     deriving Show
