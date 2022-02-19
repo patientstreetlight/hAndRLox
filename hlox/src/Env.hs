@@ -2,47 +2,42 @@ module Env (Env, define, get, set, newRootEnv, newNestedEnv, parent) where
 
 import Data.Map
 import qualified Data.Map as M
-import Data.Text
-import Value (Value)
 
-data Env = Env
-    { parent :: Maybe Env
-    , vals :: Map Text Value
+data Env k v = Env
+    { parent :: Maybe (Env k v)
+    , vals :: Map k v
     } deriving (Show)
 
-newRootEnv :: Env
+newRootEnv :: Env k v
 newRootEnv = Env
     { parent = Nothing
     , vals = M.empty
     }
 
-newNestedEnv :: Env -> Env
+newNestedEnv :: Env k v -> Env k v
 newNestedEnv p = Env
     { parent = Just p
     , vals = M.empty
     }
 
-define :: Text -> Value -> Env -> Env
+define :: Ord k => k -> v -> Env k v -> Env k v
 define var val env =
     env { vals = M.insert var val $ vals env }
 
-get :: Text -> Env -> Value
+get :: (Ord k, Show k) => k -> Env k v -> v
 get var = go . Just
   where
-    go :: Maybe Env -> Value
     go env = case env of
-        Nothing -> error $ "undefined variable " ++ unpack var
+        Nothing -> error $ "undefined variable " ++ show var
         Just e -> case M.lookup var $ vals e of
             Nothing -> go $ parent e
             Just val -> val
 
-
-set :: Text -> Value -> Env -> Env
+set :: (Ord k, Show k) => k -> v -> Env k v -> Env k v
 set var val = go . Just
   where
-    go :: Maybe Env -> Env
     go env = case env of
-        Nothing -> error $ "undefined variable " ++ unpack var
+        Nothing -> error $ "undefined variable " ++ show var
         Just e ->
             if M.member var (vals e) then
                 define var val e
