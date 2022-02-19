@@ -8,11 +8,14 @@ import Env (Env, newNestedEnv, newRootEnv)
 import qualified Env as E
 import Control.Monad.State
 import Data.Maybe (fromMaybe)
+import Data.IORef
+import Data.Text (Text)
 
+type LoxEnv = Env Text (IORef Value)
 
 newtype Lox a = Lox
-    { runLox :: StateT Env IO a
-    } deriving (Functor, Applicative, Monad, MonadState Env, MonadIO)
+    { runLox :: StateT LoxEnv IO a
+    } deriving (Functor, Applicative, Monad, MonadState LoxEnv, MonadIO)
 
 execLox :: Lox a -> IO ()
 execLox lox = void $ execStateT (runLox lox) newRootEnv
@@ -30,14 +33,14 @@ exec s = case s of
         val <- case mInitExpr of
             Nothing -> return Nil
             Just e -> eval e
-        modify $ E.define var val
+        valRef <- liftIO $ newIORef val -- XXX Does val need to be forced?
+        modify $ E.define var valRef
     Block stmts -> do
         env <- get
         let nestedEnv = newNestedEnv env
         put nestedEnv
         mapM_ exec stmts
-        mEnv' <- gets E.parent
-        maybe (error "nested env somehow had no parent") put mEnv'
+        put env
 
 eval :: Expr -> Lox Value
 eval e = case e of

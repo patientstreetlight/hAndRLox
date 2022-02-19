@@ -1,7 +1,8 @@
-module Env (Env, define, get, set, newRootEnv, newNestedEnv, parent) where
+module Env (Env, define, resolve, newRootEnv, newNestedEnv, parent) where
 
-import Data.Map
+import Data.Map (Map)
 import qualified Data.Map as M
+import Control.Applicative
 
 data Env k v = Env
     { parent :: Maybe (Env k v)
@@ -24,22 +25,9 @@ define :: Ord k => k -> v -> Env k v -> Env k v
 define var val env =
     env { vals = M.insert var val $ vals env }
 
-get :: (Ord k, Show k) => k -> Env k v -> v
-get var = go . Just
+resolve :: Ord k => k -> Env k v -> Maybe v
+resolve var = go . Just
   where
-    go env = case env of
-        Nothing -> error $ "undefined variable " ++ show var
-        Just e -> case M.lookup var $ vals e of
-            Nothing -> go $ parent e
-            Just val -> val
-
-set :: (Ord k, Show k) => k -> v -> Env k v -> Env k v
-set var val = go . Just
-  where
-    go env = case env of
-        Nothing -> error $ "undefined variable " ++ show var
-        Just e ->
-            if M.member var (vals e) then
-                define var val e
-            else
-                e { parent = Just $ go $ parent e }
+    go env = do
+        e <- env
+        M.lookup var (vals e) <|> go (parent e)
