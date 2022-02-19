@@ -26,8 +26,6 @@ define var val env =
     env { vals = M.insert var val $ vals env }
 
 resolve :: Ord k => k -> Env k v -> Maybe v
-resolve var = go . Just
+resolve var = go
   where
-    go env = do
-        e <- env
-        M.lookup var (vals e) <|> go (parent e)
+    go env = M.lookup var (vals env) <|> (parent env >>= go)
