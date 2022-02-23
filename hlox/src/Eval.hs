@@ -11,17 +11,31 @@ import Data.Maybe (fromMaybe)
 import Data.IORef
 import Data.Text (Text)
 import qualified Data.Text as T
+import Control.Monad.Except
 
-type Cell = IORef Value
+data ValOrFun
+    = Val Value
+    | Fun Function
+
+instance Show ValOrFun where
+    show (Val v) = show v
+    show (Fun f) = show f
+
+type Cell = IORef ValOrFun
 
 type LoxEnv = Env Text Cell
 
+data ControlFlow
+    = CfReturn ValOrFun
+    | CfBreak (Maybe Text)
+    | CfContinue
+
 newtype Lox a = Lox
-    { runLox :: StateT LoxEnv IO a
-    } deriving (Functor, Applicative, Monad, MonadState LoxEnv, MonadIO)
+    { runLox :: ExceptT ControlFlow (StateT LoxEnv IO) a
+    } deriving (Functor, Applicative, Monad, MonadState LoxEnv, MonadIO, MonadError ControlFlow)
 
 execLox :: Lox a -> IO ()
-execLox lox = void $ execStateT (runLox lox) newRootEnv
+execLox lox = void $ execStateT (runExceptT $ runLox lox) newRootEnv
 
 runProgram :: [Stmt] -> IO ()
 runProgram stmts = execLox (mapM_ exec stmts)
@@ -34,7 +48,7 @@ exec s = case s of
     Expr e -> void $ eval e
     Decl var mInitExpr -> do
         val <- case mInitExpr of
-            Nothing -> return Nil
+            Nothing -> return $ Val Nil
             Just e -> eval e
         valRef <- liftIO $ newIORef val -- XXX Does val need to be forced?
         modify $ E.define var valRef
@@ -57,16 +71,44 @@ exec s = case s of
                     exec loopBody
                     loop
         loop
+    DeclFun fnName params funBody -> do
+        env <- get
+        let fn =
+              Function
+                { params = params
+                , name = fnName
+                , closure = env
+                , call = mapM_ exec funBody
+                }
+        funRef <- liftIO $ newIORef $ Fun fn
+        modify $ E.define fnName funRef
+    Return mExpr -> do
+        retVal <-
+            case mExpr of
+                Nothing -> return $ Val Nil
+                Just e -> eval e
+        throwError $ CfReturn retVal
 
-truthy :: Value -> Bool
+
+data Function = Function
+    { params :: [Text]
+    , call :: Lox ()
+    , name :: Text
+    , closure :: LoxEnv
+    }
+
+instance Show Function where
+    show f = T.unpack $ name f
+
+truthy :: ValOrFun -> Bool
 truthy = \case
-    Nil -> False
-    Bool False -> False
+    Val Nil -> False
+    Val (Bool False) -> False
     _ -> True
 
-eval :: Expr -> Lox Value
+eval :: Expr -> Lox ValOrFun
 eval e = case e of
-    Literal v -> return v
+    Literal v -> return $ Val v
     Unary op e' -> unary op <$> eval e'
     Binary op l r -> binary op <$> eval l <*> eval r
     Grouping e' -> eval e'
@@ -78,6 +120,29 @@ eval e = case e of
         val <- eval e'
         liftIO $ writeIORef cell val
         return val
+    Call calleeExpr argExprs ->
+        runFunction calleeExpr argExprs
+
+runFunction :: Expr -> [Expr] -> Lox ValOrFun
+runFunction calleeExpr argExprs = do
+    callee <- eval calleeExpr
+    case callee of
+        Val v -> error $ show v ++ " is not a function"
+        Fun f | length (params f) /= length argExprs ->
+            error $ "wrong number of arguments to function " ++ show f
+        Fun f -> do
+            args <- mapM eval argExprs
+            argCells <- liftIO $ mapM newIORef args
+            let argBindings = zip (params f) argCells
+                fEnv = E.defineAll argBindings $ E.newNestedEnv $ closure f
+            oldEnv <- get
+            put fEnv
+            retVal <- (call f >> return (Val Nil)) `catchError` \e ->
+                case e of
+                    CfReturn v -> return v
+                    _ -> error "unhandled control flow"
+            put oldEnv
+            return retVal
 
 resolve :: Text -> Lox Cell
 resolve var = do
@@ -86,39 +151,44 @@ resolve var = do
         Just val -> return val
         Nothing -> error $ "undefined variable: " ++ T.unpack var
 
-unary :: UnaryOp -> Value -> Value
+unary :: UnaryOp -> ValOrFun -> ValOrFun
 unary op = case op of
     Negate -> negateVal
     Not -> notVal
 
 
-negateVal :: Value -> Value
+negateVal :: ValOrFun -> ValOrFun
 negateVal v = case v of
-    Number d -> Number $ -d
+    Val (Number d) -> Val $ Number $ -d
     _ -> error "can only negate numbers"
 
 
-notVal :: Value -> Value
-notVal v = Bool $ case v of
-    Bool b -> not b
-    Nil -> True
+notVal :: ValOrFun -> ValOrFun
+notVal v = Val . Bool $ case v of
+    Val (Bool b) -> not b
+    Val Nil -> True
     _ -> False
 
 
-binary :: BinaryOp -> Value -> Value -> Value
+binary :: BinaryOp -> ValOrFun -> ValOrFun -> ValOrFun
 binary op a b = case op of
-    Equals -> Bool $ a == b
-    NotEquals -> Bool $ a /= b
-    LessThan -> cmp (<) a b
-    LessThanEquals -> cmp (<=) a b
-    GreaterThan -> cmp (>) a b
-    GreaterThanEquals -> cmp (>=) a b
-    Add -> add a b
-    Sub -> arithmetic (-) a b
-    Mult -> arithmetic (*) a b
-    Divide -> arithmetic (/) a b
+    Equals -> valsOnly (\a b -> Bool $ a == b)
+    NotEquals -> valsOnly (\a b -> Bool $ a /= b)
+    LessThan -> valsOnly (cmp (<))
+    LessThanEquals -> valsOnly (cmp (<=))
+    GreaterThan -> valsOnly (cmp (>))
+    GreaterThanEquals -> valsOnly (cmp (>=))
+    Add -> valsOnly add
+    Sub -> valsOnly (arithmetic (-))
+    Mult -> valsOnly (arithmetic (*))
+    Divide -> valsOnly (arithmetic (/))
     And -> if truthy a then b else a
     Or -> if truthy a then a else b
+  where
+    valsOnly :: (Value -> Value -> Value) -> ValOrFun
+    valsOnly f = case (a, b) of
+        (Val a', Val b') -> Val $ f a' b'
+        _ -> error "Can't perform operation on functions"
 
 
 cmp :: (Double -> Double -> Bool) -> Value -> Value -> Value

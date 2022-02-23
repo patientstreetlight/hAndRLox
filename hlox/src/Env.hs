@@ -1,4 +1,4 @@
-module Env (Env, define, resolve, newRootEnv, newNestedEnv, parent) where
+module Env (Env, define, defineAll, resolve, newRootEnv, newNestedEnv, parent) where
 
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -24,6 +24,9 @@ newNestedEnv p = Env
 define :: Ord k => k -> v -> Env k v -> Env k v
 define var val env =
     env { vals = M.insert var val $ vals env }
+
+defineAll :: Ord k => [(k, v)] -> Env k v -> Env k v
+defineAll bindings env = foldr (uncurry define) env bindings
 
 resolve :: Ord k => k -> Env k v -> Maybe v
 resolve var = go

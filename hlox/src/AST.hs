@@ -11,6 +11,8 @@ data Stmt
     | Block [Stmt]
     | If Expr Stmt (Maybe Stmt)
     | While Expr Stmt
+    | DeclFun Text [Text] [Stmt]
+    | Return (Maybe Expr)
     deriving Show
 
 
@@ -21,6 +23,7 @@ data Expr
     | Grouping Expr
     | Identifier Text
     | Assign Text Expr
+    | Call Expr [Expr]
     deriving Show
 
 

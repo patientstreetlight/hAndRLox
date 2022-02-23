@@ -29,7 +29,7 @@ loxFile :: Parser [Stmt]
 loxFile = many declaration <* eof
 
 declaration :: Parser Stmt
-declaration = varDecl <|> stmt
+declaration = varDecl <|> funDecl <|> stmt
 
 varDecl :: Parser Stmt
 varDecl = var <* semicolon
@@ -37,6 +37,13 @@ varDecl = var <* semicolon
 -- a variable declation _without_ a trailing semicolon
 var :: Parser Stmt
 var = Decl <$ token Var <*> identifier <*> optional (token T.Equal *> expression)
+
+funDecl :: Parser Stmt
+funDecl =
+    DeclFun <$ token T.Fun <*>
+        identifier <*>
+        (token T.LeftParen *> identifier `sepBy` token T.Comma <* token T.RightParen) <*>
+        (token T.LeftBrace *> many declaration <* token T.RightBrace)
 
 semicolon :: Parser Token
 semicolon = token T.Semicolon
@@ -53,6 +60,7 @@ stmt = choice
           (token T.LeftParen *> expression <* token T.RightParen) <*>
           stmt
     , forStmt
+    , E.Return <$ token T.Return <*> optional expression <* semicolon
     , E.Expr <$> expression <* semicolon
     ]
 
@@ -216,8 +224,13 @@ unary :: Parser Expr
 unary = choice
     [ Unary Negate <$ token Minus <*> unary
     , Unary Not <$ token Bang <*> unary
-    , primary
+    , call
     ]
+
+call :: Parser Expr
+call = foldl E.Call <$> primary <*> many argsList
+  where
+    argsList = token T.LeftParen *> (expression `sepBy` token T.Comma) <* token T.RightParen
 
 primary :: Parser Expr
 primary = (E.Literal <$> literal) <|> (E.Identifier <$> identifier) <|> parens
