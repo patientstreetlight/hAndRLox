@@ -44,7 +44,7 @@ data Token
     | Print
     | Return
     | Super
-    | This
+    -- | This
     | TokTrue
     | Var
     | While

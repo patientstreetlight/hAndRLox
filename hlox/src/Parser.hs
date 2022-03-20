@@ -8,8 +8,6 @@ import Data.List (foldl')
 import AST
 import qualified AST as E
 import Data.Foldable (asum)
-import Value
-import qualified Value as V
 import Data.Text (Text)
 import Data.Maybe (fromMaybe)
 
@@ -29,7 +27,7 @@ loxFile :: Parser [Stmt]
 loxFile = many declaration <* eof
 
 declaration :: Parser Stmt
-declaration = varDecl <|> funDecl <|> stmt
+declaration = varDecl <|> funDecl <|> classDecl <|> stmt
 
 varDecl :: Parser Stmt
 varDecl = var <* semicolon
@@ -42,8 +40,25 @@ funDecl :: Parser Stmt
 funDecl =
     DeclFun <$ token T.Fun <*>
         identifier <*>
-        (token T.LeftParen *> identifier `sepBy` token T.Comma <* token T.RightParen) <*>
+        argList <*>
         (token T.LeftBrace *> many declaration <* token T.RightBrace)
+
+argList :: Parser [Text]
+argList = token T.LeftParen *> identifier `sepBy` token T.Comma <* token T.RightParen
+
+classDecl :: Parser Stmt
+classDecl =
+    DeclClass <$ token T.Class <*>
+        identifier <*>
+        (token T.LeftBrace *> many methodDecl <* token T.RightBrace)
+
+methodDecl :: Parser Method
+methodDecl =
+    Method <$>
+    identifier <*>
+    argList <*>
+    (token T.LeftBrace *> many declaration <* token T.RightBrace)
+
 
 semicolon :: Parser Token
 semicolon = token T.Semicolon
@@ -75,7 +90,7 @@ forStmt = mkForLoop <$ token T.For <*>
     mkForLoop :: Maybe Stmt -> Maybe Expr -> Maybe Expr -> Stmt -> Stmt
     mkForLoop mInitializer mCondition mIncrement loopBody = forLoop
       where
-        condition = fromMaybe (E.Literal $ Bool True) mCondition
+        condition = fromMaybe (E.Literal $ LitBool True) mCondition
         loopBodyWithIncrement =
             case mIncrement of
                 Nothing -> loopBody
@@ -178,6 +193,7 @@ assignment = logicOr `chainr1` (assign <$ token T.Equal)
 assign :: Expr -> Expr -> Expr
 assign l r = case l of
     E.Identifier i -> Assign i r
+    E.Get objExpr fieldName -> E.Set objExpr fieldName r
     _ -> error "Invalid assignment target"
 
 logicOr :: Parser Expr
@@ -228,9 +244,13 @@ unary = choice
     ]
 
 call :: Parser Expr
-call = foldl E.Call <$> primary <*> many argsList
+call = foldl (flip ($)) <$> primary <*> many callOrGet
   where
-    argsList = token T.LeftParen *> (expression `sepBy` token T.Comma) <* token T.RightParen
+    callOrGet :: Parser (Expr -> Expr)
+    callOrGet = choice
+        [ flip E.Call <$> (token T.LeftParen *> (expression `sepBy` token T.Comma) <* token T.RightParen)
+        , flip E.Get <$> (token T.Dot *> identifier)
+        ]
 
 primary :: Parser Expr
 primary = (E.Literal <$> literal) <|> (E.Identifier <$> identifier) <|> parens
@@ -238,13 +258,13 @@ primary = (E.Literal <$> literal) <|> (E.Identifier <$> identifier) <|> parens
 parens :: Parser Expr
 parens = (Grouping <$ token LeftParen) <*> expression <* token RightParen
 
-literal :: Parser Value
+literal :: Parser Literal
 literal = pluck $ \case
-    T.Number n -> Just $ V.Number n
-    T.String s -> Just $ V.String s
-    TokFalse -> Just $ V.Bool False
-    TokTrue -> Just $ V.Bool True
-    T.Nil -> Just V.Nil
+    T.Number n -> Just $ LitNumber n
+    T.String s -> Just $ LitString s
+    TokFalse -> Just $ LitBool False
+    TokTrue -> Just $ LitBool True
+    T.Nil -> Just LitNil
     _ -> Nothing
 
 identifier :: Parser Text

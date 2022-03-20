@@ -226,7 +226,7 @@ toIdentifierOrKeyword lexeme = case lexeme of
     "print" -> Print
     "return" -> Return
     "super" -> Super
-    "this" -> This
+    --"this" -> This
     "true" -> TokTrue
     "var" -> Var
     "while" -> While

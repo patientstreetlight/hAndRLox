@@ -31,7 +31,6 @@ library
       Lexer
       Parser
       Token
-      Value
   other-modules:
       Paths_hlox
   hs-source-dirs:

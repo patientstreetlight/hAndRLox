@@ -1,15 +1,19 @@
-fun makeCounter() {
-  var i = 0;
-  fun count() {
-    i = i + 1;
-    print i;
+class Foo {
+  init() {
+    this.counter = 0;
   }
-  return count;
+
+  inc() {
+    this.counter = this.counter + 1;
+  }
+
+  getCount() {
+    return this.counter;
+  }
 }
 
-var counter = makeCounter();
-var counter2 = makeCounter();
-counter(); // "1".
-counter(); // "2".
-counter2();
-counter2();
+var f = Foo();
+f.init();
+f.inc();
+f.inc();
+print f.getCount();
