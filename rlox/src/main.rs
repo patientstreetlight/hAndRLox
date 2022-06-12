@@ -1,18 +1,17 @@
 pub mod chunk;
-pub mod value;
-pub mod vm;
 pub mod compiler;
 pub mod scanner;
+pub mod value;
+pub mod vm;
 
 use crate::chunk::Chunk;
-use crate::chunk::Instruction;
 use crate::value::Value;
-use crate::vm::VM;
 use crate::vm::InterpretResult;
+use crate::vm::VM;
 
 use std::env;
-use std::io::{self, BufRead, Write};
 use std::fs;
+use std::io::{self, BufRead, Write};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -34,7 +33,7 @@ fn repl() {
             println!("");
             break;
         }
-        VM::interpret2(&line);
+        VM::interpret(&line);
     }
 }
 
@@ -47,7 +46,7 @@ fn run_file(script_file: &str) {
             std::process::exit(74);
         }
     };
-    let result = VM::interpret2(&file);
+    let result = VM::interpret(&file);
     match result {
         InterpretResult::CompileError => std::process::exit(65),
         InterpretResult::RuntimeError => std::process::exit(70),

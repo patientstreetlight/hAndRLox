@@ -3,17 +3,6 @@ use std::convert::TryFrom;
 use std::convert::TryInto;
 
 #[derive(Debug, Copy, Clone)]
-pub enum Instruction {
-    CONSTANT(Value),
-    NEGATE,
-    ADD,
-    SUBTRACT,
-    MULIPLY,
-    DIVIDE,
-    RETURN,
-}
-
-#[derive(Debug, Copy, Clone)]
 pub enum OpCode {
     CONSTANT,
     NEGATE,
@@ -50,20 +39,6 @@ impl OpCode {
     }
 }
 
-impl Instruction {
-    fn opcode(&self) -> OpCode {
-        match self {
-            Self::CONSTANT(_) => OpCode::CONSTANT,
-            Self::NEGATE => OpCode::NEGATE,
-            Self::RETURN => OpCode::RETURN,
-            Self::ADD => OpCode::ADD,
-            Self::SUBTRACT => OpCode::SUBTRACT,
-            Self::MULIPLY => OpCode::MULIPLY,
-            Self::DIVIDE => OpCode::DIVIDE,
-        }
-    }
-}
-
 pub struct Chunk {
     pub code: Vec<u8>,
     pub constants: Vec<Value>,
@@ -79,55 +54,20 @@ impl Chunk {
         }
     }
 
-    pub fn write(&mut self, inst: Instruction, line: usize) {
-        self.code.push(inst.opcode() as u8);
+    pub fn write(&mut self, b: u8, line: usize) {
+        self.code.push(b);
         self.lines.push(line);
-        match inst {
-            Instruction::CONSTANT(v) => {
-                let index = self.constants.len();
-                self.constants.push(v);
-                self.code.push(index as u8);
-                self.lines.push(line);
-            }
-            _ => ()
-        }
     }
 
-    pub fn instructions(&self) -> ChunkIter {
-        ChunkIter {
-            byte_iter: self.code.iter(),
-            chunk: self,
-        }
-    }
-
-    pub fn disassemble(&self, name: &str) {
-        println!("== {} ==", name);
-        for i in self.instructions() {
-            println!("{:?}", i);
-        }
+    pub fn write_constant(&mut self, v: Value, line: usize) {
+        let index = self.constants.len();
+        self.constants.push(v);
+        self.write(OpCode::CONSTANT as u8, line);
+        self.write(index as u8, line);
     }
 }
 
 pub struct ChunkIter<'a> {
     byte_iter: std::slice::Iter<'a, u8>,
     chunk: &'a Chunk,
-}
-
-impl Iterator for ChunkIter<'_> {
-    type Item = Instruction;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let byte = self.byte_iter.next()?;
-        match byte {
-            0 => {
-                let constant_index = *self.byte_iter.next().expect("Expected constant index");
-                let constant = self.chunk.constants[constant_index as usize];
-                Some(Instruction::CONSTANT(constant))
-            }
-            1 => {
-                Some(Instruction::RETURN)
-            }
-            _ => panic!("unknown opcode")
-        }
-    }
 }

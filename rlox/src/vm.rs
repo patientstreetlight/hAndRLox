@@ -1,13 +1,12 @@
-
-use crate::Chunk;
-use crate::Value;
 use crate::chunk::OpCode;
 use crate::compiler::compile;
+use crate::Chunk;
+use crate::Value;
 
 pub struct VM {
     chunk: Chunk,
     ip: usize,
-    stack: Vec<Value>
+    stack: Vec<Value>,
 }
 
 pub enum InterpretResult {
@@ -17,18 +16,17 @@ pub enum InterpretResult {
 }
 
 impl VM {
-    pub fn interpret(chunk: Chunk) -> InterpretResult {
+    pub fn interpret(source: &str) -> InterpretResult {
+        let mut chunk = Chunk::new();
+        if !compile(source, &mut chunk) {
+            return InterpretResult::CompileError;
+        }
         let mut vm = VM {
             chunk: chunk,
             ip: 0,
             stack: Vec::new(),
         };
-        vm.run()
-    }
-
-    pub fn interpret2(source: &str) -> InterpretResult {
-        compile(source);
-        InterpretResult::OK
+        return vm.run();
     }
 
     fn run(&mut self) -> InterpretResult {
@@ -90,30 +88,30 @@ impl VM {
 
 fn negate(v: Value) -> Value {
     match v {
-        Value::Num(x) => Value::Num(-x)
+        Value::Num(x) => Value::Num(-x),
     }
 }
 
 fn add(a: Value, b: Value) -> Value {
     match (a, b) {
-        (Value::Num(a), Value::Num(b)) => Value::Num(a + b)
+        (Value::Num(a), Value::Num(b)) => Value::Num(a + b),
     }
 }
 
 fn subtract(a: Value, b: Value) -> Value {
     match (a, b) {
-        (Value::Num(a), Value::Num(b)) => Value::Num(a - b)
+        (Value::Num(a), Value::Num(b)) => Value::Num(a - b),
     }
 }
 
 fn multiply(a: Value, b: Value) -> Value {
     match (a, b) {
-        (Value::Num(a), Value::Num(b)) => Value::Num(a * b)
+        (Value::Num(a), Value::Num(b)) => Value::Num(a * b),
     }
 }
 
 fn divide(a: Value, b: Value) -> Value {
     match (a, b) {
-        (Value::Num(a), Value::Num(b)) => Value::Num(a / b)
+        (Value::Num(a), Value::Num(b)) => Value::Num(a / b),
     }
 }

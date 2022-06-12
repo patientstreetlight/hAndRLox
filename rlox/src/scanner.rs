@@ -1,4 +1,3 @@
-
 // XXX Consider making Scanner an iterator of Tokens
 pub struct Scanner<'a> {
     start: &'a str,
@@ -6,34 +5,60 @@ pub struct Scanner<'a> {
     current_token_len: usize,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Copy, Clone)]
 pub struct Token<'a> {
     pub token_type: TokenType,
     pub lexeme: &'a str,
     pub line: u32,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum TokenType {
     // Single character tokens:
-    LeftParen, RightParen,
-    LeftBrace, RightBrace,
-    Comma, Dot, Minus, Plus,
-    Semicolon, Slash, Star,
+    LeftParen,
+    RightParen,
+    LeftBrace,
+    RightBrace,
+    Comma,
+    Dot,
+    Minus,
+    Plus,
+    Semicolon,
+    Slash,
+    Star,
     // One or two character tokens:
-    Bang, BangEqual,
-    Equal, EqualEqual,
-    Greater, GreaterEqual,
-    Less, LessEqual,
+    Bang,
+    BangEqual,
+    Equal,
+    EqualEqual,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
     // Literals:
-    Identifier, String, Number,
+    Identifier,
+    String,
+    Number,
     // Keywords:
-    And, Class, Else, False,
-    For, Fun, If, Nil, Or,
-    Print, Return, Super, This,
-    True, Var, While,
+    And,
+    Class,
+    Else,
+    False,
+    For,
+    Fun,
+    If,
+    Nil,
+    Or,
+    Print,
+    Return,
+    Super,
+    This,
+    True,
+    Var,
+    While,
 
-    Error, EOF,
+    Error,
+    EOF,
 }
 
 impl<'a> Scanner<'a> {
@@ -41,11 +66,11 @@ impl<'a> Scanner<'a> {
         Scanner {
             start: source,
             line: 1,
-            current_token_len: 0
+            current_token_len: 0,
         }
     }
 
-    pub fn scan_token(&mut self) -> Token {
+    pub fn scan_token(&mut self) -> Token<'a> {
         self.skip_whitespace();
         self.start = &self.start[self.current_token_len..];
         self.current_token_len = 0;
@@ -76,7 +101,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn identifier(&mut self) -> Token {
+    fn identifier(&mut self) -> Token<'a> {
         loop {
             let c = self.peek();
             match c {
@@ -108,7 +133,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn number(&mut self) -> Token {
+    fn number(&mut self) -> Token<'a> {
         self.consume_digits();
         let a = self.peek();
         let b = self.peek_next();
@@ -118,7 +143,7 @@ impl<'a> Scanner<'a> {
                 self.current_token_len += 1;
                 self.consume_digits();
             }
-            _ => ()
+            _ => (),
         }
         self.mk_token(TokenType::Number)
     }
@@ -133,7 +158,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn string(&mut self) -> Token {
+    fn string(&mut self) -> Token<'a> {
         loop {
             match self.peek() {
                 Some('"') => {
@@ -141,7 +166,7 @@ impl<'a> Scanner<'a> {
                     return self.mk_token(TokenType::String);
                 }
                 Some(_) => self.current_token_len += 1,
-                None => return self.error_token("Unterminated string.")
+                None => return self.error_token("Unterminated string."),
             }
         }
     }
@@ -155,17 +180,15 @@ impl<'a> Scanner<'a> {
                     self.line += 1;
                     self.current_token_len += 1;
                 }
-                Some('/') => {
-                    match self.peek_next() {
-                        Some('/') => {
-                            while !self.is_at_end() && self.peek() != Some('\n') {
-                                self.current_token_len += 1;
-                            }
+                Some('/') => match self.peek_next() {
+                    Some('/') => {
+                        while !self.is_at_end() && self.peek() != Some('\n') {
+                            self.current_token_len += 1;
                         }
-                        _ => return
                     }
-                }
-                _ => return
+                    _ => return,
+                },
+                _ => return,
             }
         }
     }
@@ -178,8 +201,12 @@ impl<'a> Scanner<'a> {
         self.rest_chars().skip(1).next()
     }
 
-    fn try_match_equal(&mut self, if_match: TokenType, if_not_match: TokenType) -> Token {
-        let token_type = if self.try_match('=') { if_match } else { if_not_match };
+    fn try_match_equal(&mut self, if_match: TokenType, if_not_match: TokenType) -> Token<'a> {
+        let token_type = if self.try_match('=') {
+            if_match
+        } else {
+            if_not_match
+        };
         self.mk_token(token_type)
     }
 
@@ -193,7 +220,7 @@ impl<'a> Scanner<'a> {
                 self.current_token_len += 1;
                 true
             }
-            _ => false
+            _ => false,
         }
     }
 
@@ -201,7 +228,7 @@ impl<'a> Scanner<'a> {
         self.start.len() == self.current_token_len
     }
 
-    fn mk_token(&mut self, token_type: TokenType) -> Token {
+    fn mk_token(&mut self, token_type: TokenType) -> Token<'a> {
         Token {
             token_type: token_type,
             lexeme: &self.start[0..self.current_token_len],
@@ -209,7 +236,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn error_token(&mut self, msg: &'static str) -> Token {
+    fn error_token(&mut self, msg: &'static str) -> Token<'static> {
         Token {
             token_type: TokenType::Error,
             lexeme: msg,
@@ -218,7 +245,9 @@ impl<'a> Scanner<'a> {
     }
 
     fn advance(&mut self) -> char {
-        let c = self.rest_chars().next()
+        let c = self
+            .rest_chars()
+            .next()
             .expect("advance() called when there are no more characters");
         self.current_token_len += 1;
         c
@@ -329,12 +358,12 @@ mod tests {
 
     #[test]
     fn with_equals() {
-        let cases =
-            [ ("!", TokenType::Bang, TokenType::BangEqual)
-            , ("=", TokenType::Equal, TokenType::EqualEqual)
-            , (">", TokenType::Greater, TokenType::GreaterEqual)
-            , ("<", TokenType::Less, TokenType::LessEqual)
-            ];
+        let cases = [
+            ("!", TokenType::Bang, TokenType::BangEqual),
+            ("=", TokenType::Equal, TokenType::EqualEqual),
+            (">", TokenType::Greater, TokenType::GreaterEqual),
+            ("<", TokenType::Less, TokenType::LessEqual),
+        ];
         for (prefix, tok_without_eq, tok_with_eq) in cases {
             let mut scanner = Scanner::new(prefix);
             let tok = scanner.scan_token();
@@ -376,14 +405,14 @@ mod tests {
     #[test]
     fn sequence() {
         let mut scanner = Scanner::new("var x = 10;");
-        let expected_tokens =
-            [ ("var", TokenType::Var)
-            , ("x", TokenType::Identifier)
-            , ("=", TokenType::Equal)
-            , ("10", TokenType::Number)
-            , (";", TokenType::Semicolon)
-            , ("", TokenType::EOF)
-            ];
+        let expected_tokens = [
+            ("var", TokenType::Var),
+            ("x", TokenType::Identifier),
+            ("=", TokenType::Equal),
+            ("10", TokenType::Number),
+            (";", TokenType::Semicolon),
+            ("", TokenType::EOF),
+        ];
         for (lexeme, expected_type) in expected_tokens {
             let tok = scanner.scan_token();
             let expected = Token {
