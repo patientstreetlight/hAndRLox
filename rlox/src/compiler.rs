@@ -21,7 +21,6 @@ struct Parser<'a> {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 enum Precedence {
-    None,
     Assignment,
     Or,
     And,
@@ -37,7 +36,6 @@ enum Precedence {
 impl Precedence {
     fn next_highest(&self) -> Precedence {
         match self {
-            Self::None => Self::Assignment,
             Self::Assignment => Self::Or,
             Self::Or => Self::And,
             Self::And => Self::Equality,
@@ -52,10 +50,10 @@ impl Precedence {
     }
 }
 
-struct BinaryOp {
+struct BinaryOp<'a> {
     associativity: Associativity,
     precedence: Precedence,
-    opcode: OpCode,
+    parser: fn(&mut Parser<'a>),
 }
 
 enum Associativity {
@@ -63,27 +61,57 @@ enum Associativity {
     Right,
 }
 
-fn get_binary_op(token_type: TokenType) -> Option<BinaryOp> {
+fn get_infix_parser<'a>(token_type: TokenType) -> Option<BinaryOp<'a>> {
     match token_type {
         TokenType::Minus => Some(BinaryOp {
             associativity: Associativity::Left,
             precedence: Precedence::Term,
-            opcode: OpCode::SUBTRACT,
+            parser: Parser::binary,
         }),
         TokenType::Plus => Some(BinaryOp {
             associativity: Associativity::Left,
             precedence: Precedence::Term,
-            opcode: OpCode::ADD,
+            parser: Parser::binary,
         }),
         TokenType::Star => Some(BinaryOp {
             associativity: Associativity::Left,
             precedence: Precedence::Factor,
-            opcode: OpCode::MULIPLY,
+            parser: Parser::binary,
         }),
         TokenType::Slash => Some(BinaryOp {
             associativity: Associativity::Left,
             precedence: Precedence::Factor,
-            opcode: OpCode::DIVIDE,
+            parser: Parser::binary,
+        }),
+        TokenType::BangEqual => Some(BinaryOp {
+            associativity: Associativity::Left,
+            precedence: Precedence::Equality,
+            parser: Parser::binary,
+        }),
+        TokenType::EqualEqual => Some(BinaryOp {
+            associativity: Associativity::Left,
+            precedence: Precedence::Equality,
+            parser: Parser::binary,
+        }),
+        TokenType::Greater => Some(BinaryOp {
+            associativity: Associativity::Left,
+            precedence: Precedence::Comparison,
+            parser: Parser::binary,
+        }),
+        TokenType::GreaterEqual => Some(BinaryOp {
+            associativity: Associativity::Left,
+            precedence: Precedence::Comparison,
+            parser: Parser::binary,
+        }),
+        TokenType::Less => Some(BinaryOp {
+            associativity: Associativity::Left,
+            precedence: Precedence::Comparison,
+            parser: Parser::binary,
+        }),
+        TokenType::LessEqual => Some(BinaryOp {
+            associativity: Associativity::Left,
+            precedence: Precedence::Comparison,
+            parser: Parser::binary,
         }),
         _ => None,
     }
@@ -94,6 +122,10 @@ fn get_prefix_parser<'a>(token_type: TokenType) -> Option<fn(&mut Parser<'a>)> {
         TokenType::LeftParen => Some(Parser::grouping),
         TokenType::Minus => Some(Parser::unary),
         TokenType::Number => Some(Parser::number),
+        TokenType::True => Some(Parser::literal),
+        TokenType::False => Some(Parser::literal),
+        TokenType::Nil => Some(Parser::literal),
+        TokenType::Bang => Some(Parser::unary),
         _ => None,
     }
 }
@@ -193,19 +225,42 @@ impl<'a> Parser<'a> {
         self.parse_precedence(Precedence::Unary);
         let op = match operator_type {
             TokenType::Minus => OpCode::NEGATE,
+            TokenType::Bang => OpCode::NOT,
             _ => panic!("bad unary operator type"),
         };
         self.emit_byte(op as u8);
     }
 
-    fn binary(&mut self, binary_op: BinaryOp) {
-        // parse right hand side
+    fn binary(&mut self) {
+        let token_type = self.previous.token_type;
+        let binary_op = get_infix_parser(token_type).unwrap();
         let rhs_precedence = match binary_op.associativity {
             Associativity::Left => binary_op.precedence.next_highest(),
             Associativity::Right => binary_op.precedence,
         };
         self.parse_precedence(rhs_precedence);
-        self.emit_byte(binary_op.opcode as u8);
+        match token_type {
+            TokenType::Minus => self.emit_byte(OpCode::SUBTRACT as u8),
+            TokenType::Plus => self.emit_byte(OpCode::ADD as u8),
+            TokenType::Star => self.emit_byte(OpCode::MULIPLY as u8),
+            TokenType::Slash => self.emit_byte(OpCode::DIVIDE as u8),
+            TokenType::BangEqual => self.emit_bytes(OpCode::EQUAL as u8, OpCode::NOT as u8),
+            TokenType::EqualEqual => self.emit_byte(OpCode::EQUAL as u8),
+            TokenType::Greater => self.emit_byte(OpCode::GREATER as u8),
+            TokenType::GreaterEqual => self.emit_bytes(OpCode::LESS as u8, OpCode::NOT as u8),
+            TokenType::Less => self.emit_byte(OpCode::LESS as u8),
+            TokenType::LessEqual => self.emit_bytes(OpCode::GREATER as u8, OpCode::NOT as u8),
+            _ => panic!("invalid binary token"),
+        }
+    }
+
+    fn literal(&mut self) {
+        match self.previous.token_type {
+            TokenType::True => self.emit_byte(OpCode::TRUE as u8),
+            TokenType::False => self.emit_byte(OpCode::FALSE as u8),
+            TokenType::Nil => self.emit_byte(OpCode::NIL as u8),
+            t => panic!("invalid literal type {:?}", t),
+        }
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) {
@@ -218,10 +273,10 @@ impl<'a> Parser<'a> {
             }
         }
         loop {
-            match get_binary_op(self.current.token_type) {
+            match get_infix_parser(self.current.token_type) {
                 Some(binary_op) if binary_op.precedence >= precedence => {
                     self.advance();
-                    self.binary(binary_op);
+                    (binary_op.parser)(self);
                 }
                 _ => break,
             }

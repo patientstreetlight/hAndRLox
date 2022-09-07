@@ -11,6 +11,13 @@ pub enum OpCode {
     MULIPLY,
     DIVIDE,
     RETURN,
+    NIL,
+    TRUE,
+    FALSE,
+    NOT,
+    EQUAL,
+    GREATER,
+    LESS,
 }
 
 impl TryFrom<u8> for OpCode {
@@ -25,6 +32,13 @@ impl TryFrom<u8> for OpCode {
             x if x == OpCode::SUBTRACT as u8 => Ok(OpCode::SUBTRACT),
             x if x == OpCode::MULIPLY as u8 => Ok(OpCode::MULIPLY),
             x if x == OpCode::DIVIDE as u8 => Ok(OpCode::DIVIDE),
+            x if x == OpCode::NIL as u8 => Ok(OpCode::NIL),
+            x if x == OpCode::TRUE as u8 => Ok(OpCode::TRUE),
+            x if x == OpCode::FALSE as u8 => Ok(OpCode::FALSE),
+            x if x == OpCode::NOT as u8 => Ok(OpCode::NOT),
+            x if x == OpCode::EQUAL as u8 => Ok(OpCode::EQUAL),
+            x if x == OpCode::GREATER as u8 => Ok(OpCode::GREATER),
+            x if x == OpCode::LESS as u8 => Ok(OpCode::LESS),
             _ => Err(()),
         }
     }

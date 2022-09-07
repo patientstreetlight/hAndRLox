@@ -1,7 +1,7 @@
 use crate::chunk::OpCode;
 use crate::compiler::compile;
 use crate::Chunk;
-use crate::Value;
+use crate::value::*;
 
 pub struct VM {
     chunk: Chunk,
@@ -67,6 +67,28 @@ impl VM {
                     let a = self.pop();
                     self.push(divide(a, b));
                 }
+                OpCode::NIL => self.push(Value::Nil),
+                OpCode::TRUE => self.push(Value::Bool(true)),
+                OpCode::FALSE => self.push(Value::Bool(false)),
+                OpCode::NOT => {
+                    let a = self.pop();
+                    self.push(is_falsey(a));
+                }
+                OpCode::EQUAL => {
+                    let b = self.pop();
+                    let a = self.pop();
+                    self.push(a.lox_eq(&b));
+                }
+                OpCode::GREATER => {
+                    let b = self.pop();
+                    let a = self.pop();
+                    self.push(greater(a, b));
+                }
+                OpCode::LESS => {
+                    let b = self.pop();
+                    let a = self.pop();
+                    self.push(less(a, b));
+                }
             }
         }
     }
@@ -83,35 +105,5 @@ impl VM {
 
     fn pop(&mut self) -> Value {
         self.stack.pop().expect("popped an empty stack")
-    }
-}
-
-fn negate(v: Value) -> Value {
-    match v {
-        Value::Num(x) => Value::Num(-x),
-    }
-}
-
-fn add(a: Value, b: Value) -> Value {
-    match (a, b) {
-        (Value::Num(a), Value::Num(b)) => Value::Num(a + b),
-    }
-}
-
-fn subtract(a: Value, b: Value) -> Value {
-    match (a, b) {
-        (Value::Num(a), Value::Num(b)) => Value::Num(a - b),
-    }
-}
-
-fn multiply(a: Value, b: Value) -> Value {
-    match (a, b) {
-        (Value::Num(a), Value::Num(b)) => Value::Num(a * b),
-    }
-}
-
-fn divide(a: Value, b: Value) -> Value {
-    match (a, b) {
-        (Value::Num(a), Value::Num(b)) => Value::Num(a / b),
     }
 }
