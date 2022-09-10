@@ -1,8 +1,11 @@
-#[derive(Debug, Copy, Clone)]
+use std::rc::Rc;
+
+#[derive(Debug, Clone)]
 pub enum Value {
     Num(f64),
     Bool(bool),
     Nil,
+    Str(Rc<String>),
 }
 
 impl Value {
@@ -55,6 +58,12 @@ pub fn is_falsey(v: Value) -> Value {
 pub fn add(a: Value, b: Value) -> Value {
     match (a, b) {
         (Value::Num(a), Value::Num(b)) => Value::Num(a + b),
+        (Value::Str(s1), Value::Str(s2)) => {
+            let mut s = String::new();
+            s.push_str(s1.as_ref());
+            s.push_str(s2.as_ref());
+            Value::Str(Rc::new(s))
+        }
         _ => panic!("Can only add numbers and strings"),
     }
 }

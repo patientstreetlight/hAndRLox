@@ -35,7 +35,7 @@ impl VM {
             match opcode {
                 OpCode::CONSTANT => {
                     let constant_index = self.read_byte();
-                    let constant = self.chunk.constants[constant_index as usize];
+                    let constant = self.chunk.constants[constant_index as usize].clone();
                     self.push(constant);
                 }
                 OpCode::RETURN => {

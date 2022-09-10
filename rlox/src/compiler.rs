@@ -1,6 +1,8 @@
 use crate::chunk::{Chunk, OpCode};
 use crate::scanner::{Scanner, Token, TokenType};
 use crate::value::Value;
+use std::rc::Rc;
+
 
 pub fn compile(source: &str, chunk: &mut Chunk) -> bool {
     let mut parser = Parser::new(source, chunk);
@@ -126,6 +128,7 @@ fn get_prefix_parser<'a>(token_type: TokenType) -> Option<fn(&mut Parser<'a>)> {
         TokenType::False => Some(Parser::literal),
         TokenType::Nil => Some(Parser::literal),
         TokenType::Bang => Some(Parser::unary),
+        TokenType::String => Some(Parser::string),
         _ => None,
     }
 }
@@ -209,6 +212,17 @@ impl<'a> Parser<'a> {
     fn number(&mut self) {
         let n: f64 = self.previous.lexeme.parse().unwrap();
         self.emit_constant(Value::Num(n));
+    }
+
+    fn string(&mut self) {
+        // The lexeme contains the initial and trailing " characters which need
+        // to be stripped.
+        let lexeme = self.previous.lexeme;
+        let stripped_lexeme = &lexeme[1..lexeme.len()-1];
+        let s = String::from(stripped_lexeme);
+        let rc_s = Rc::new(s);
+        let lox_s = Value::Str(rc_s);
+        self.emit_constant(lox_s);
     }
 
     fn emit_constant(&mut self, val: Value) {
