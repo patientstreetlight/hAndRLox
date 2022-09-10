@@ -14,6 +14,7 @@ impl Value {
             (Value::Num(a), Value::Num(b)) if a == b => true,
             (Value::Bool(a), Value::Bool(b)) if a == b => true,
             (Value::Nil, Value::Nil) => true,
+            (Value::Str(a), Value::Str(b)) => a == b,
             _ => false,
         };
         Value::Bool(b)
