@@ -1,3 +1,4 @@
+use std::fmt;
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -6,6 +7,17 @@ pub enum Value {
     Bool(bool),
     Nil,
     Str(Rc<String>),
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Num(n) => write!(f, "{}", n),
+            Self::Bool(b) => write!(f, "{}", b),
+            Self::Nil => write!(f, "nil"),
+            Self::Str(s) => write!(f, "{}", s.as_ref()),
+        }
+    }
 }
 
 impl Value {

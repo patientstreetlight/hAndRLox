@@ -1,12 +1,13 @@
 use crate::chunk::OpCode;
 use crate::compiler::compile;
-use crate::Chunk;
 use crate::value::*;
+use crate::Chunk;
 
 pub struct VM {
     chunk: Chunk,
     ip: usize,
     stack: Vec<Value>,
+    globals: Vec<Option<Value>>,
 }
 
 pub enum InterpretResult {
@@ -25,6 +26,7 @@ impl VM {
             chunk: chunk,
             ip: 0,
             stack: Vec::new(),
+            globals: Vec::new(),
         };
         return vm.run();
     }
@@ -39,8 +41,6 @@ impl VM {
                     self.push(constant);
                 }
                 OpCode::RETURN => {
-                    let val = self.pop();
-                    println!("{:?}", val);
                     return InterpretResult::OK;
                 }
                 OpCode::NEGATE => {
@@ -89,6 +89,40 @@ impl VM {
                     let a = self.pop();
                     self.push(less(a, b));
                 }
+                OpCode::PRINT => {
+                    let a = self.pop();
+                    println!("{}", a);
+                }
+                OpCode::POP => {
+                    self.pop();
+                }
+                OpCode::DEF_GLOBAL => {
+                    let global = self.read_byte() as usize;
+                    for i in self.globals.len()..=global {
+                        self.globals.push(None);
+                    }
+                    let val = self.pop();
+                    self.globals[global] = Some(val);
+                }
+                OpCode::GET_GLOBAL => {
+                    let global = self.read_byte() as usize;
+                    match self.globals.get(global) {
+                        Some(Some(val)) => {
+                            let val = val.clone();
+                            self.push(val);
+                        }
+                        // XXX Need some kind of id -> name mapping for debugging purposes
+                        _ => panic!("Undefined global variable"),
+                    }
+                }
+                OpCode::SET_GLOBAL => {
+                    let global = self.read_byte() as usize;
+                    if global < self.globals.len() {
+                        self.globals[global] = Some(self.peek());
+                    } else {
+                        panic!("Cannot assign to undeclared global variable");
+                    }
+                }
             }
         }
     }
@@ -105,5 +139,9 @@ impl VM {
 
     fn pop(&mut self) -> Value {
         self.stack.pop().expect("popped an empty stack")
+    }
+
+    fn peek(&self) -> Value {
+        self.stack[self.stack.len() - 1].clone()
     }
 }

@@ -18,6 +18,11 @@ pub enum OpCode {
     EQUAL,
     GREATER,
     LESS,
+    PRINT,
+    POP,
+    DEF_GLOBAL,
+    GET_GLOBAL,
+    SET_GLOBAL,
 }
 
 impl TryFrom<u8> for OpCode {
@@ -39,6 +44,11 @@ impl TryFrom<u8> for OpCode {
             x if x == OpCode::EQUAL as u8 => Ok(OpCode::EQUAL),
             x if x == OpCode::GREATER as u8 => Ok(OpCode::GREATER),
             x if x == OpCode::LESS as u8 => Ok(OpCode::LESS),
+            x if x == OpCode::PRINT as u8 => Ok(OpCode::PRINT),
+            x if x == OpCode::POP as u8 => Ok(OpCode::POP),
+            x if x == OpCode::DEF_GLOBAL as u8 => Ok(OpCode::DEF_GLOBAL),
+            x if x == OpCode::GET_GLOBAL as u8 => Ok(OpCode::GET_GLOBAL),
+            x if x == OpCode::SET_GLOBAL as u8 => Ok(OpCode::SET_GLOBAL),
             _ => Err(()),
         }
     }
@@ -78,6 +88,12 @@ impl Chunk {
         self.constants.push(v);
         self.write(OpCode::CONSTANT as u8, line);
         self.write(index as u8, line);
+    }
+
+    pub fn mk_constant(&mut self, v: Value, line: usize) -> usize {
+        let index = self.constants.len();
+        self.constants.push(v);
+        index
     }
 }
 
