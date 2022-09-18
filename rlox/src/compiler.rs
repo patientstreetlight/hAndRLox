@@ -13,6 +13,18 @@ pub fn compile(source: &str, chunk: &mut Chunk) -> bool {
     !parser.had_error
 }
 
+struct Local<'a> {
+    name: &'a str,
+    depth: usize,
+    initialized: bool,
+}
+
+struct Compiler<'a> {
+    globals: HashMap<String, u8>,
+    locals: Vec<Local<'a>>,
+    scope_depth: usize,
+}
+
 struct Parser<'a> {
     current: Token<'a>,
     previous: Token<'a>,
@@ -20,7 +32,7 @@ struct Parser<'a> {
     had_error: bool,
     panic_mode: bool,
     chunk: &'a mut Chunk,
-    globals: HashMap<String, u8>,
+    compiler: Compiler<'a>,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -140,6 +152,11 @@ impl<'a> Parser<'a> {
     fn new(source: &'a str, chunk: &'a mut Chunk) -> Parser<'a> {
         let mut scanner = Scanner::new(source);
         let first_token = scanner.scan_token();
+        let compiler = Compiler {
+            globals: HashMap::new(),
+            locals: Vec::new(),
+            scope_depth: 0,
+        };
         Parser {
             previous: first_token,
             current: first_token,
@@ -147,7 +164,7 @@ impl<'a> Parser<'a> {
             had_error: false,
             panic_mode: false,
             chunk,
-            globals: HashMap::new(),
+            compiler,
         }
     }
 
@@ -189,13 +206,52 @@ impl<'a> Parser<'a> {
     }
 
     fn define_variable(&mut self, idx: u8) {
+        if self.compiler.scope_depth > 0 {
+            self.mark_initialized();
+            return;
+        }
         self.emit_bytes(OpCode::DEF_GLOBAL as u8, idx);
+    }
+
+    fn mark_initialized(&mut self) {
+        let num_locals = self.compiler.locals.len();
+        self.compiler.locals[num_locals - 1].initialized = true;
     }
 
     fn parse_variable(&mut self) -> u8 {
         self.consume(TokenType::Identifier, "Expected identifier after var");
+        self.declare_variable();
+        if self.compiler.scope_depth > 0 {
+            // XXX Is this right?
+            return 0;
+        }
         let var_name = self.previous.lexeme;
         self.resolve_global(var_name)
+    }
+
+    fn declare_variable(&mut self) {
+        if self.compiler.scope_depth == 0 {
+            return;
+        }
+        let name = self.previous.lexeme;
+        let conflict = self.compiler.locals
+            .iter()
+            .rev()
+            .take_while(|l| l.depth == self.compiler.scope_depth)
+            .any(|l| l.name == name);
+        if conflict {
+            self.error("Already a variable with this name in this scope.");
+        }
+        self.add_local(name);
+    }
+
+    fn add_local(&mut self, name: &'a str) {
+        let local = Local {
+            name,
+            depth: self.compiler.scope_depth,
+            initialized: false,
+        };
+        self.compiler.locals.push(local);
     }
 
     fn synchronize(&mut self) {
@@ -221,10 +277,38 @@ impl<'a> Parser<'a> {
     fn statement(&mut self) {
         if self.try_match(TokenType::Print) {
             self.print_statement();
+        } else if self.try_match(TokenType::LeftBrace) {
+            self.begin_scope();
+            self.block();
+            self.end_scope();
         } else {
             self.expression();
             self.consume(TokenType::Semicolon, "Expect ';' after expression");
             self.emit_byte(OpCode::POP as u8);
+        }
+    }
+
+    fn block(&mut self) {
+        while !self.check(TokenType::EOF) && !self.check(TokenType::RightBrace) {
+            self.declaration();
+        }
+        self.consume(TokenType::RightBrace, "Expect '}' after block.");
+    }
+
+    fn begin_scope(&mut self) {
+        self.compiler.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self) {
+        self.compiler.scope_depth -= 1;
+        loop {
+            match self.compiler.locals.last() {
+                Some(l) if l.depth > self.compiler.scope_depth => {
+                    self.compiler.locals.pop();
+                    self.emit_byte(OpCode::POP as u8);
+                }
+                _ => break,
+            }
         }
     }
 
@@ -338,25 +422,44 @@ impl<'a> Parser<'a> {
     }
 
     fn named_variable(&mut self, name_token: Token, can_assign: bool) {
-        let global = self.resolve_global(name_token.lexeme);
+        let name = name_token.lexeme;
+        let (get_op, set_op, arg) = match self.resolve_local(name) {
+            Some(local_index) => (OpCode::GET_LOCAL, OpCode::SET_LOCAL, local_index),
+            None => {
+                let global = self.resolve_global(name_token.lexeme);
+                (OpCode::GET_GLOBAL, OpCode::SET_GLOBAL, global)
+            }
+        };
         if can_assign && self.try_match(TokenType::Equal) {
             self.expression();
-            self.emit_bytes(OpCode::SET_GLOBAL as u8, global);
+            self.emit_bytes(set_op as u8, arg);
         } else {
-            self.emit_bytes(OpCode::GET_GLOBAL as u8, global);
+            self.emit_bytes(get_op as u8, arg);
         }
     }
 
+    fn resolve_local(&mut self, name: &str) -> Option<u8> {
+        for (i, l) in self.compiler.locals.iter().enumerate().rev() {
+            if l.name == name {
+                if !l.initialized {
+                    self.error("Can't read local variable in its own initializer.");
+                }
+                return Some(i as u8);
+            }
+        }
+        None
+    }
+
     fn resolve_global(&mut self, name: &str) -> u8 {
-        match self.globals.get(name) {
+        match self.compiler.globals.get(name) {
             Some(&id) => id,
             None => {
-                let id = self.globals.len();
+                let id = self.compiler.globals.len();
                 if id > 255 {
                     panic!("Too many globals");
                 }
                 let id = id as u8;
-                self.globals.insert(String::from(name), id);
+                self.compiler.globals.insert(String::from(name), id);
                 id
             }
         }

@@ -123,6 +123,14 @@ impl VM {
                         panic!("Cannot assign to undeclared global variable");
                     }
                 }
+                OpCode::GET_LOCAL => {
+                    let slot = self.read_byte() as usize;
+                    self.push(self.stack[slot].clone());
+                }
+                OpCode::SET_LOCAL => {
+                    let slot = self.read_byte() as usize;
+                    self.stack[slot] = self.peek();
+                }
             }
         }
     }

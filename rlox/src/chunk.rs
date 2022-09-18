@@ -23,6 +23,8 @@ pub enum OpCode {
     DEF_GLOBAL,
     GET_GLOBAL,
     SET_GLOBAL,
+    GET_LOCAL,
+    SET_LOCAL,
 }
 
 impl TryFrom<u8> for OpCode {
@@ -49,6 +51,8 @@ impl TryFrom<u8> for OpCode {
             x if x == OpCode::DEF_GLOBAL as u8 => Ok(OpCode::DEF_GLOBAL),
             x if x == OpCode::GET_GLOBAL as u8 => Ok(OpCode::GET_GLOBAL),
             x if x == OpCode::SET_GLOBAL as u8 => Ok(OpCode::SET_GLOBAL),
+            x if x == OpCode::GET_LOCAL as u8 => Ok(OpCode::GET_LOCAL),
+            x if x == OpCode::SET_LOCAL as u8 => Ok(OpCode::SET_LOCAL),
             _ => Err(()),
         }
     }
