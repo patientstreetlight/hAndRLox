@@ -67,68 +67,54 @@ impl Precedence {
 }
 
 struct BinaryOp<'a> {
-    associativity: Associativity,
     precedence: Precedence,
     parser: fn(&mut Parser<'a>),
-}
-
-enum Associativity {
-    Left,
-    Right,
 }
 
 fn get_infix_parser<'a>(token_type: TokenType) -> Option<BinaryOp<'a>> {
     match token_type {
         TokenType::Minus => Some(BinaryOp {
-            associativity: Associativity::Left,
             precedence: Precedence::Term,
             parser: Parser::binary,
         }),
         TokenType::Plus => Some(BinaryOp {
-            associativity: Associativity::Left,
             precedence: Precedence::Term,
             parser: Parser::binary,
         }),
         TokenType::Star => Some(BinaryOp {
-            associativity: Associativity::Left,
             precedence: Precedence::Factor,
             parser: Parser::binary,
         }),
         TokenType::Slash => Some(BinaryOp {
-            associativity: Associativity::Left,
             precedence: Precedence::Factor,
             parser: Parser::binary,
         }),
         TokenType::BangEqual => Some(BinaryOp {
-            associativity: Associativity::Left,
             precedence: Precedence::Equality,
             parser: Parser::binary,
         }),
         TokenType::EqualEqual => Some(BinaryOp {
-            associativity: Associativity::Left,
             precedence: Precedence::Equality,
             parser: Parser::binary,
         }),
         TokenType::Greater => Some(BinaryOp {
-            associativity: Associativity::Left,
             precedence: Precedence::Comparison,
             parser: Parser::binary,
         }),
         TokenType::GreaterEqual => Some(BinaryOp {
-            associativity: Associativity::Left,
             precedence: Precedence::Comparison,
             parser: Parser::binary,
         }),
         TokenType::Less => Some(BinaryOp {
-            associativity: Associativity::Left,
             precedence: Precedence::Comparison,
             parser: Parser::binary,
         }),
         TokenType::LessEqual => Some(BinaryOp {
-            associativity: Associativity::Left,
             precedence: Precedence::Comparison,
             parser: Parser::binary,
         }),
+        TokenType::And => Some(BinaryOp { precedence: Precedence::And, parser: Parser::and }),
+        TokenType::Or => Some(BinaryOp { precedence: Precedence::Or, parser: Parser::or }),
         _ => None,
     }
 }
@@ -281,11 +267,123 @@ impl<'a> Parser<'a> {
             self.begin_scope();
             self.block();
             self.end_scope();
+        } else if self.try_match(TokenType::If) {
+            self.if_statement();
+        } else if self.try_match(TokenType::While) {
+            self.while_statement();
+        } else if self.try_match(TokenType::For) {
+            self.for_statement();
         } else {
+            self.expression_statement();
+        }
+    }
+
+    fn expression_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after expression");
+        self.emit_byte(OpCode::POP as u8);
+    }
+
+    fn for_statement(&mut self) {
+        // XXX Add support for break/continue.  Also to while loops.
+        self.begin_scope();
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for'.");
+        // initializer
+        if self.try_match(TokenType::Semicolon) {
+        } else if self.try_match(TokenType::Var) {
+            self.var_declaration();
+        } else {
+            self.expression_statement();
+        }
+        // test
+        let mut loop_start = self.current_loc();
+        let mut test_to_loop_end: Option<usize> = None;
+        if !self.try_match(TokenType::Semicolon) {
             self.expression();
-            self.consume(TokenType::Semicolon, "Expect ';' after expression");
+            self.consume(TokenType::Semicolon, "Expect ; after test");
+            test_to_loop_end = Some(self.emit_jump(OpCode::JUMP_IF_FALSE));
             self.emit_byte(OpCode::POP as u8);
         }
+        if !self.try_match(TokenType::RightParen) {
+            let loop_body = self.emit_jump(OpCode::JUMP);
+            let increment_start = self.current_loc();
+            self.expression();
+            self.emit_byte(OpCode::POP as u8);
+            self.consume(TokenType::RightParen, "Expect ')' after for clauses");
+            self.emit_loop(loop_start);
+            loop_start = increment_start;
+            self.patch_jump(loop_body);
+        }
+        // loop body
+        self.statement();
+        self.emit_loop(loop_start);
+        // end
+        if let Some(test_to_loop_end) = test_to_loop_end {
+            self.patch_jump(test_to_loop_end);
+            self.emit_byte(OpCode::POP as u8);
+        }
+        self.end_scope();
+    }
+
+    fn current_loc(&self) -> usize {
+        self.chunk.code.len()
+    }
+
+    fn while_statement(&mut self) {
+        let loop_start = self.current_loc();
+        self.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after while condition");
+        let jump_to_end = self.emit_jump(OpCode::JUMP_IF_FALSE);
+        self.emit_byte(OpCode::POP as u8);
+        self.statement();
+        self.emit_loop(loop_start);
+        self.patch_jump(jump_to_end);
+        self.emit_byte(OpCode::POP as u8);
+    }
+
+    fn emit_loop(&mut self, loop_start: usize) {
+        self.emit_byte(OpCode::LOOP as u8);
+        let jump = self.current_loc() + 2 - loop_start;
+        let jump = jump as u16;
+        let hi = (jump >> 8) & 0xff;
+        let lo = jump & 0xff;
+        self.emit_byte(hi as u8);
+        self.emit_byte(lo as u8);
+    }
+
+    fn if_statement(&mut self) {
+        self.consume(TokenType::LeftParen, "Expect '(' after if");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after if confition");
+        let jump_to_else = self.emit_jump(OpCode::JUMP_IF_FALSE);
+        // start of then branch
+        self.emit_byte(OpCode::POP as u8);
+        self.statement();
+        let jump_to_end = self.emit_jump(OpCode::JUMP);
+        // start of else branch
+        self.patch_jump(jump_to_else);
+        self.emit_byte(OpCode::POP as u8);
+        if self.try_match(TokenType::Else) {
+            self.statement();
+        }
+        self.patch_jump(jump_to_end);
+    }
+
+    fn emit_jump(&mut self, op: OpCode) -> usize {
+        self.emit_byte(op as u8);
+        self.emit_byte(0xff);
+        self.emit_byte(0xff);
+        self.current_loc() - 2
+    }
+
+    fn patch_jump(&mut self, patch: usize) {
+        let patch = patch as usize;
+        let jump_distance = self.current_loc() - patch - 2;
+        let hi = ((jump_distance >> 8) & 0xff) as u8;
+        let lo = (jump_distance & 0xff) as u8;
+        self.chunk.code[patch] = hi;
+        self.chunk.code[patch + 1] = lo;
     }
 
     fn block(&mut self) {
@@ -468,10 +566,7 @@ impl<'a> Parser<'a> {
     fn binary(&mut self) {
         let token_type = self.previous.token_type;
         let binary_op = get_infix_parser(token_type).unwrap();
-        let rhs_precedence = match binary_op.associativity {
-            Associativity::Left => binary_op.precedence.next_highest(),
-            Associativity::Right => binary_op.precedence,
-        };
+        let rhs_precedence = binary_op.precedence.next_highest();
         self.parse_precedence(rhs_precedence);
         match token_type {
             TokenType::Minus => self.emit_byte(OpCode::SUBTRACT as u8),
@@ -486,6 +581,24 @@ impl<'a> Parser<'a> {
             TokenType::LessEqual => self.emit_bytes(OpCode::GREATER as u8, OpCode::NOT as u8),
             _ => panic!("invalid binary token"),
         }
+    }
+
+    fn and(&mut self) {
+        let end_jump = self.emit_jump(OpCode::JUMP_IF_FALSE);
+        self.emit_byte(OpCode::POP as u8);
+        self.parse_precedence(Precedence::And);
+        self.patch_jump(end_jump);
+    }
+
+    fn or(&mut self) {
+        let continue_jump = self.emit_jump(OpCode::JUMP_IF_FALSE);
+        // lhs was true
+        let end_jump = self.emit_jump(OpCode::JUMP);
+        // lhs was false
+        self.patch_jump(continue_jump);
+        self.emit_byte(OpCode::POP as u8);
+        self.parse_precedence(Precedence::Or);
+        self.patch_jump(end_jump);
     }
 
     fn literal(&mut self, _can_assign: bool) {

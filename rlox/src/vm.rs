@@ -23,7 +23,7 @@ impl VM {
             return InterpretResult::CompileError;
         }
         let mut vm = VM {
-            chunk: chunk,
+            chunk,
             ip: 0,
             stack: Vec::new(),
             globals: Vec::new(),
@@ -131,6 +131,20 @@ impl VM {
                     let slot = self.read_byte() as usize;
                     self.stack[slot] = self.peek();
                 }
+                OpCode::JUMP_IF_FALSE => {
+                    let offset = self.read_short() as usize;
+                    if Self::is_falsey_bool(self.peek()) {
+                        self.ip += offset;
+                    }
+                }
+                OpCode::JUMP => {
+                    let offset = self.read_short() as usize;
+                    self.ip += offset;
+                }
+                OpCode::LOOP => {
+                    let offset = self.read_short() as usize;
+                    self.ip -= offset;
+                }
             }
         }
     }
@@ -139,6 +153,17 @@ impl VM {
         let b = self.chunk.code[self.ip];
         self.ip += 1;
         b
+    }
+
+    fn is_falsey_bool(v: Value) -> bool {
+        matches!(v, Value::Nil | Value::Bool(false))
+    }
+
+    fn read_short(&mut self) -> u16 {
+        let hi_byte = self.chunk.code[self.ip] as u16;
+        let lo_byte = self.chunk.code[self.ip + 1] as u16;
+        self.ip += 2;
+        hi_byte << 8 | lo_byte
     }
 
     fn push(&mut self, value: Value) {
