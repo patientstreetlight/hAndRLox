@@ -127,6 +127,7 @@ impl<'a> Scanner<'a> {
             "print" => TokenType::Print,
             "return" => TokenType::Return,
             "super" => TokenType::Super,
+            "true" => TokenType::True,
             "var" => TokenType::Var,
             "while" => TokenType::While,
             _ => TokenType::Identifier,
@@ -398,6 +399,42 @@ mod tests {
             lexeme: "for",
             line: 1,
             token_type: TokenType::For,
+        };
+        assert_eq!(tok, expected);
+    }
+
+    #[test]
+    fn test_true() {
+        let mut scanner = Scanner::new("true");
+        let tok = scanner.scan_token();
+        let expected = Token {
+            lexeme:  "true",
+            line: 1,
+            token_type: TokenType::True,
+        };
+        assert_eq!(tok, expected);
+    }
+
+    #[test]
+    fn test_false() {
+        let mut scanner = Scanner::new("false");
+        let tok = scanner.scan_token();
+        let expected = Token {
+            lexeme:  "false",
+            line: 1,
+            token_type: TokenType::False,
+        };
+        assert_eq!(tok, expected);
+    }
+
+    #[test]
+    fn test_nil() {
+        let mut scanner = Scanner::new("nil");
+        let tok = scanner.scan_token();
+        let expected = Token {
+            lexeme:  "nil",
+            line: 1,
+            token_type: TokenType::Nil,
         };
         assert_eq!(tok, expected);
     }
