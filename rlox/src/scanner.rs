@@ -408,7 +408,7 @@ mod tests {
         let mut scanner = Scanner::new("true");
         let tok = scanner.scan_token();
         let expected = Token {
-            lexeme:  "true",
+            lexeme: "true",
             line: 1,
             token_type: TokenType::True,
         };
@@ -420,7 +420,7 @@ mod tests {
         let mut scanner = Scanner::new("false");
         let tok = scanner.scan_token();
         let expected = Token {
-            lexeme:  "false",
+            lexeme: "false",
             line: 1,
             token_type: TokenType::False,
         };
@@ -432,7 +432,7 @@ mod tests {
         let mut scanner = Scanner::new("nil");
         let tok = scanner.scan_token();
         let expected = Token {
-            lexeme:  "nil",
+            lexeme: "nil",
             line: 1,
             token_type: TokenType::Nil,
         };

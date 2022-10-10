@@ -28,6 +28,7 @@ pub enum OpCode {
     JUMP_IF_FALSE,
     JUMP,
     LOOP,
+    CALL,
 }
 
 impl TryFrom<u8> for OpCode {
@@ -59,6 +60,7 @@ impl TryFrom<u8> for OpCode {
             x if x == OpCode::JUMP_IF_FALSE as u8 => Ok(OpCode::JUMP_IF_FALSE),
             x if x == OpCode::JUMP as u8 => Ok(OpCode::JUMP),
             x if x == OpCode::LOOP as u8 => Ok(OpCode::LOOP),
+            x if x == OpCode::CALL as u8 => Ok(OpCode::CALL),
             _ => Err(()),
         }
     }

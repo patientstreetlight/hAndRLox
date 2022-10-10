@@ -1,3 +1,4 @@
+use crate::Chunk;
 use std::fmt;
 use std::rc::Rc;
 
@@ -7,6 +8,45 @@ pub enum Value {
     Bool(bool),
     Nil,
     Str(Rc<String>),
+    // XXX Should probably be GC'd rather than RC'd
+    Function(Rc<Function>),
+    NativeFn(Rc<NativeFn>),
+}
+
+pub struct NativeFn {
+    pub name: String,
+    pub function: fn(&mut [Value]) -> Value,
+}
+
+impl fmt::Debug for NativeFn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<native fn {}>", self.name)
+    }
+}
+
+pub struct Function {
+    pub arity: u8,
+    pub chunk: Chunk,
+    pub name: Option<String>,
+}
+
+impl Function {
+    pub fn new() -> Function {
+        Function {
+            arity: 0,
+            chunk: Chunk::new(),
+            name: None,
+        }
+    }
+}
+
+impl fmt::Debug for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.name.as_ref() {
+            None => write!(f, "<script>"),
+            Some(name) => write!(f, "<fn {}>", name),
+        }
+    }
 }
 
 impl fmt::Display for Value {
@@ -16,6 +56,11 @@ impl fmt::Display for Value {
             Self::Bool(b) => write!(f, "{}", b),
             Self::Nil => write!(f, "nil"),
             Self::Str(s) => write!(f, "{}", s.as_ref()),
+            Self::Function(function) => match &function.name {
+                None => write!(f, "<script>"),
+                Some(name) => write!(f, "<fn {}>", name),
+            },
+            Self::NativeFn(function) => write!(f, "<native fn {}>", function.name),
         }
     }
 }
