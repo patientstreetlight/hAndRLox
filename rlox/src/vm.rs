@@ -2,7 +2,10 @@ use crate::chunk::OpCode;
 use crate::compiler::compile;
 use crate::native::ALL_NATIVE_FNS;
 use crate::value::*;
+use std::borrow::Borrow;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::rc::Rc;
 
 pub struct VM {
@@ -10,10 +13,12 @@ pub struct VM {
     top_frame: Frame,
     frames: Vec<Frame>,
     globals: Vec<Option<Value>>,
+    open_upvalues: HashMap<usize, UpValueRef>,
+    debug_enabled: bool,
 }
 
 struct Frame {
-    function: Rc<Function>,
+    closure: Rc<Closure>,
     base_pointer: usize,
     ip: usize,
 }
@@ -26,41 +31,53 @@ pub enum InterpretResult {
 
 // XXX should print stack trace on error
 impl VM {
-    pub fn interpret(source: &str) -> InterpretResult {
+    pub fn interpret(source: &str, debug_mode: bool) -> InterpretResult {
         let (global_ids, globals) = VM::define_natives();
         let f = match compile(source, global_ids) {
             None => return InterpretResult::CompileError,
             Some(f) => f,
         };
         let f = Rc::new(f);
+        let closure = Closure::new(f, vec![]);
         let first_frame = Frame {
-            function: f.clone(),
+            closure: closure.clone(),
             base_pointer: 0,
             ip: 0,
         };
         let mut vm = VM {
-            stack: vec![Value::Function(f)],
+            stack: vec![Value::Closure(closure)],
             top_frame: first_frame,
             frames: Vec::new(),
             globals,
+            open_upvalues: HashMap::new(),
+            debug_enabled: debug_mode,
         };
         vm.run()
     }
 
     fn run(&mut self) -> InterpretResult {
         loop {
+            if self.debug_enabled {
+                self.print_diagnostics();
+            }
             let opcode = OpCode::from_u8(self.read_byte());
             match opcode {
                 OpCode::CONSTANT => {
                     let constant_index = self.read_byte();
-                    let constant =
-                        self.top_frame.function.chunk.constants[constant_index as usize].clone();
+                    let constant = self.top_frame.closure.function.chunk.constants
+                        [constant_index as usize]
+                        .clone();
                     self.push(constant);
                 }
                 OpCode::RETURN => {
                     let ret_val = self.pop();
                     while self.stack.len() > self.top_frame.base_pointer {
-                        self.pop();
+                        let top = self.stack.len() - 1;
+                        if let Some(upvalue) = self.open_upvalues.remove(&top) {
+                            *upvalue.borrow_mut() = UpValue::Closed(self.pop());
+                        } else {
+                            self.pop();
+                        }
                     }
                     self.push(ret_val);
                     if let Some(frame) = self.frames.pop() {
@@ -176,12 +193,15 @@ impl VM {
                     let base_pointer = self.stack.len() - 1 - num_args;
                     let f = self.stack[base_pointer].clone();
                     match f {
-                        Value::Function(f) => {
-                            if f.arity != num_args as u8 {
-                                panic!("Expected {} args but got {}", f.arity, num_args);
+                        Value::Closure(closure) => {
+                            if closure.function.arity != num_args as u8 {
+                                panic!(
+                                    "Expected {} args but got {}",
+                                    closure.function.arity, num_args
+                                );
                             }
                             let new_frame = Frame {
-                                function: f,
+                                closure,
                                 base_pointer,
                                 ip: 0,
                             };
@@ -199,12 +219,79 @@ impl VM {
                         _ => panic!("{f} is not a function"),
                     }
                 }
+                OpCode::CLOSURE => {
+                    let f_idx = self.read_byte() as usize;
+                    let f = self.top_frame.closure.function.chunk.constants[f_idx].clone();
+                    let f = match f {
+                        Value::Function(f) => f,
+                        _ => panic!("Can only wrap functions in closures"),
+                    };
+                    let upvalue_count = f.upvalue_count as usize;
+                    let mut upvalues: Vec<UpValueRef> = Vec::with_capacity(upvalue_count);
+                    let base_pointer = self.top_frame.base_pointer;
+                    for _ in 0..upvalue_count {
+                        let is_local = self.read_byte();
+                        let is_local = is_local == 1;
+                        let index = self.read_byte() as usize;
+                        let upvalue = if is_local {
+                            let upvalue_index = base_pointer + index;
+                            match self.open_upvalues.get(&upvalue_index) {
+                                Some(upvalue) => upvalue.clone(),
+                                None => {
+                                    let new_upvalue =
+                                        Rc::new(RefCell::new(UpValue::Open(upvalue_index)));
+                                    self.open_upvalues
+                                        .insert(upvalue_index, new_upvalue.clone());
+                                    new_upvalue
+                                }
+                            }
+                        } else {
+                            self.top_frame.closure.upvalues[index].clone()
+                        };
+                        upvalues.push(upvalue);
+                    }
+                    let closure = Closure::new(f, upvalues);
+                    self.push(Value::Closure(closure));
+                }
+                OpCode::CLOSE_UPVALUE => {
+                    let upvalue_index = self.stack.len() - 1;
+                    match self.open_upvalues.remove(&upvalue_index) {
+                        None => panic!("Open upvalue not found in vm.open_upvalues"),
+                        Some(upvalue) => *upvalue.borrow_mut() = UpValue::Closed(self.pop()),
+                    }
+                }
+                OpCode::GET_UPVALUE => {
+                    let upvalue_index = self.read_byte() as usize;
+                    let upvalue_ref = self.top_frame.closure.upvalues[upvalue_index].clone();
+                    match &*upvalue_ref.borrow_mut() {
+                        UpValue::Open(location) => {
+                            let val = self.stack[*location].clone();
+                            self.push(val);
+                        }
+                        UpValue::Closed(val) => {
+                            self.push(val.clone());
+                        }
+                    };
+                }
+                OpCode::SET_UPVALUE => {
+                    let upvalue_index = self.read_byte() as usize;
+                    let upvalue_ref = self.top_frame.closure.upvalues[upvalue_index].clone();
+                    let val = self.peek();
+                    match *upvalue_ref.borrow_mut() {
+                        UpValue::Open(location) => {
+                            self.stack[location] = val;
+                        }
+                        UpValue::Closed(ref mut old_val) => {
+                            *old_val = val;
+                        }
+                    };
+                }
             }
         }
     }
 
     fn read_byte(&mut self) -> u8 {
-        let b = self.top_frame.function.chunk.code[self.top_frame.ip];
+        let b = self.top_frame.closure.function.chunk.code[self.top_frame.ip];
         self.top_frame.ip += 1;
         b
     }
@@ -214,8 +301,8 @@ impl VM {
     }
 
     fn read_short(&mut self) -> u16 {
-        let hi_byte = self.top_frame.function.chunk.code[self.top_frame.ip] as u16;
-        let lo_byte = self.top_frame.function.chunk.code[self.top_frame.ip + 1] as u16;
+        let hi_byte = self.top_frame.closure.function.chunk.code[self.top_frame.ip] as u16;
+        let lo_byte = self.top_frame.closure.function.chunk.code[self.top_frame.ip + 1] as u16;
         self.top_frame.ip += 2;
         hi_byte << 8 | lo_byte
     }
@@ -232,7 +319,6 @@ impl VM {
         self.stack[self.stack.len() - 1].clone()
     }
 
-    // XXX Somehow use this.
     fn define_natives() -> (HashMap<String, u8>, Vec<Option<Value>>) {
         let mut natives = HashMap::new();
         let mut globals: Vec<Option<Value>> = vec![];
@@ -247,5 +333,159 @@ impl VM {
             globals.push(Some(native_fn));
         }
         (natives, globals)
+    }
+
+    fn print_diagnostics(&self) {
+        println!("\n============");
+        println!("stack");
+        println!("-----");
+        let base_pointer = self.top_frame.base_pointer;
+        for (i, v) in self.stack.iter().enumerate() {
+            let bp_marker = if i == base_pointer { "*" } else { " " };
+            println!("{} {:4} {:?}", bp_marker, i, v);
+        }
+        if !self.globals.is_empty() {
+            println!("globals");
+            println!("-------");
+            for (i, v) in self.globals.iter().enumerate() {
+                if let Some(v) = v {
+                    println!("{:4} {:?}", i, v);
+                }
+            }
+        }
+        if !self.open_upvalues.is_empty() {
+            println!("open upvalues");
+            println!("-------------");
+            for (k, v) in self.open_upvalues.iter() {
+                let v = v.borrow_mut();
+                println!("{:4} {:?}", k, v);
+            }
+        }
+        println!("curr fun: {:?}", self.top_frame.closure.as_ref());
+        println!("constants");
+        println!("---------");
+        for (i, v) in self
+            .top_frame
+            .closure
+            .function
+            .chunk
+            .constants
+            .iter()
+            .enumerate()
+        {
+            println!("{:4} {:?}", i, v);
+        }
+        println!("code");
+        println!("----");
+        let mut chunk_iter = self
+            .top_frame
+            .closure
+            .function
+            .chunk
+            .code
+            .iter()
+            .enumerate();
+        let ip = self.top_frame.ip;
+        while let Some((i, &inst)) = chunk_iter.next() {
+            let mut print_byte = || {
+                let (_, &c) = chunk_iter.next().unwrap();
+                println!("  {c}");
+            };
+            let opcode = OpCode::from_u8(inst);
+            let marker = if ip == i { "* " } else { "  " };
+            print!("{marker}");
+            match opcode {
+                OpCode::CONSTANT => {
+                    println!("CONSTANT");
+                    print_byte();
+                }
+                OpCode::NEGATE => println!("NEGATE"),
+                OpCode::ADD => println!("ADD"),
+                OpCode::SUBTRACT => println!("SUBTRACT"),
+                OpCode::MULIPLY => println!("MULTIPLY"),
+                OpCode::DIVIDE => println!("DIVIDE"),
+                OpCode::RETURN => println!("RETURN"),
+                OpCode::NIL => println!("NIL"),
+                OpCode::TRUE => println!("TRUE"),
+                OpCode::FALSE => println!("FALSE"),
+                OpCode::NOT => println!("NOT"),
+                OpCode::EQUAL => println!("EQUAL"),
+                OpCode::GREATER => println!("GREATER"),
+                OpCode::LESS => println!("LESS"),
+                OpCode::PRINT => println!("PRINT"),
+                OpCode::POP => println!("POP"),
+                OpCode::DEF_GLOBAL => {
+                    println!("DEF_GLOBAL");
+                    print_byte();
+                }
+                OpCode::GET_GLOBAL => {
+                    println!("GET_GLOBAL");
+                    print_byte();
+                }
+                OpCode::SET_GLOBAL => {
+                    println!("SET_GLOBAL");
+                    print_byte();
+                }
+                OpCode::GET_LOCAL => {
+                    println!("GET_LOCAL");
+                    print_byte();
+                }
+                OpCode::SET_LOCAL => {
+                    println!("SET_LOCAL");
+                    print_byte();
+                }
+                OpCode::JUMP_IF_FALSE => {
+                    println!("JUMP_IF_FALSE");
+                    let (_, &a) = chunk_iter.next().unwrap();
+                    let (_, &b) = chunk_iter.next().unwrap();
+                    let short: u16 = (a as u16) << 8 | b as u16;
+                    println!("  {short}");
+                }
+                OpCode::JUMP => {
+                    println!("JUMP");
+                    let (_, &a) = chunk_iter.next().unwrap();
+                    let (_, &b) = chunk_iter.next().unwrap();
+                    let short: u16 = (a as u16) << 8 | b as u16;
+                    println!("  {short}");
+                }
+                OpCode::LOOP => {
+                    println!("LOOP");
+                    let (_, &a) = chunk_iter.next().unwrap();
+                    let (_, &b) = chunk_iter.next().unwrap();
+                    let short: u16 = (a as u16) << 8 | b as u16;
+                    println!("  {short}");
+                }
+                OpCode::CALL => {
+                    println!("CALL");
+                    print_byte();
+                }
+                OpCode::CLOSURE => {
+                    println!("CLOSURE");
+                    let (_, &f_idx) = chunk_iter.next().unwrap();
+                    let f = &self.top_frame.closure.function.chunk.constants[f_idx as usize];
+                    let f = match f {
+                        Value::Function(f) => f,
+                        _ => panic!("Can only wrap functions in closures"),
+                    };
+                    println!("  {f_idx} ({:?})", f);
+                    let upvalue_count = f.upvalue_count;
+                    for _ in 0..upvalue_count {
+                        let (_, &is_local) = chunk_iter.next().unwrap();
+                        let (_, &index) = chunk_iter.next().unwrap();
+                        println!("  {is_local}");
+                        println!("  {index}");
+                    }
+                }
+                OpCode::GET_UPVALUE => {
+                    println!("GET_UPVALUE");
+                    print_byte();
+                }
+                OpCode::SET_UPVALUE => {
+                    println!("SET_UPVALUE");
+                    print_byte();
+                }
+                OpCode::CLOSE_UPVALUE => println!("CLOSE_UPVALUE"),
+            }
+        }
     }
 }

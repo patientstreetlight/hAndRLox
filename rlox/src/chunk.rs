@@ -29,6 +29,10 @@ pub enum OpCode {
     JUMP,
     LOOP,
     CALL,
+    CLOSURE,
+    GET_UPVALUE,
+    SET_UPVALUE,
+    CLOSE_UPVALUE,
 }
 
 impl TryFrom<u8> for OpCode {
@@ -61,6 +65,10 @@ impl TryFrom<u8> for OpCode {
             x if x == OpCode::JUMP as u8 => Ok(OpCode::JUMP),
             x if x == OpCode::LOOP as u8 => Ok(OpCode::LOOP),
             x if x == OpCode::CALL as u8 => Ok(OpCode::CALL),
+            x if x == OpCode::CLOSURE as u8 => Ok(OpCode::CLOSURE),
+            x if x == OpCode::GET_UPVALUE as u8 => Ok(OpCode::GET_UPVALUE),
+            x if x == OpCode::SET_UPVALUE as u8 => Ok(OpCode::SET_UPVALUE),
+            x if x == OpCode::CLOSE_UPVALUE as u8 => Ok(OpCode::CLOSE_UPVALUE),
             _ => Err(()),
         }
     }

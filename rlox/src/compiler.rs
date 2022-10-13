@@ -17,6 +17,13 @@ struct Local<'a> {
     name: &'a str,
     depth: usize,
     initialized: bool,
+    is_captured: bool,
+}
+
+#[derive(Copy, Clone)]
+struct UpValue {
+    index: u8,
+    is_local: bool,
 }
 
 #[derive(std::cmp::PartialEq)]
@@ -36,6 +43,7 @@ struct FnCompiler<'a> {
     function_type: FunctionType,
     locals: Vec<Local<'a>>,
     scope_depth: usize,
+    upvalues: Vec<UpValue>,
 }
 
 impl<'a> FnCompiler<'a> {
@@ -50,8 +58,10 @@ impl<'a> FnCompiler<'a> {
                 name: "",
                 depth: 0,
                 initialized: true,
+                is_captured: false,
             }],
             scope_depth: 0,
+            upvalues: vec![],
         }
     }
 }
@@ -203,9 +213,8 @@ impl<'a> Parser<'a> {
     // popped by end_fn_compiler()
     fn push_new_fn_compiler(&mut self) {
         let name = self.previous.lexeme.to_string();
-        let mut function = Function::new();
-        function.name = Some(name);
-        let fn_compiler = FnCompiler::new(FunctionType::Function);
+        let mut fn_compiler = FnCompiler::new(FunctionType::Function);
+        fn_compiler.function.name = Some(name);
         let prev_fn_compiler = std::mem::replace(&mut self.compiler.curr_fn_compiler, fn_compiler);
         self.compiler.fn_compilers.push(prev_fn_compiler);
     }
@@ -296,9 +305,15 @@ impl<'a> Parser<'a> {
         );
         self.consume(TokenType::LeftBrace, "Expect '{' before function body.");
         self.block();
+        let upvalues = self.compiler.curr_fn_compiler.upvalues.clone();
         let function = self.end_fn_compiler();
         let function = Value::Function(Rc::new(function));
-        self.emit_constant(function);
+        let function_constant = self.mk_constant(function);
+        self.emit_bytes(OpCode::CLOSURE as u8, function_constant);
+        for upvalue in upvalues {
+            self.emit_byte(if upvalue.is_local { 1 } else { 0 });
+            self.emit_byte(upvalue.index);
+        }
     }
 
     fn var_declaration(&mut self) {
@@ -368,6 +383,7 @@ impl<'a> Parser<'a> {
             name,
             depth: self.compiler.curr_fn_compiler.scope_depth,
             initialized: false,
+            is_captured: false,
         };
         self.compiler.curr_fn_compiler.locals.push(local);
     }
@@ -549,8 +565,13 @@ impl<'a> Parser<'a> {
         loop {
             match self.compiler.curr_fn_compiler.locals.last() {
                 Some(l) if l.depth > self.compiler.curr_fn_compiler.scope_depth => {
+                    let opcode = if l.is_captured {
+                        OpCode::CLOSE_UPVALUE
+                    } else {
+                        OpCode::POP
+                    };
                     self.compiler.curr_fn_compiler.locals.pop();
-                    self.emit_byte(OpCode::POP as u8);
+                    self.emit_byte(opcode as u8);
                 }
                 _ => break,
             }
@@ -660,6 +681,11 @@ impl<'a> Parser<'a> {
         self.emit_constant(lox_s);
     }
 
+    fn mk_constant(&mut self, val: Value) -> u8 {
+        let prev_line = self.previous.line as usize;
+        self.current_chunk().mk_constant(val, prev_line) as u8
+    }
+
     fn emit_constant(&mut self, val: Value) {
         let prev_line = self.previous.line as usize;
         self.current_chunk().write_constant(val, prev_line);
@@ -687,13 +713,17 @@ impl<'a> Parser<'a> {
 
     fn named_variable(&mut self, name_token: Token, can_assign: bool) {
         let name = name_token.lexeme;
-        let (get_op, set_op, arg) = match self.resolve_local(name) {
-            Some(local_index) => (OpCode::GET_LOCAL, OpCode::SET_LOCAL, local_index),
-            None => {
+        let (get_op, set_op, arg) = self
+            .resolve_local(name, 0)
+            .map(|local_index| (OpCode::GET_LOCAL, OpCode::SET_LOCAL, local_index))
+            .or_else(|| {
+                self.resolve_upvalue(name, 0)
+                    .map(|upvalue_index| (OpCode::GET_UPVALUE, OpCode::SET_UPVALUE, upvalue_index))
+            })
+            .unwrap_or_else(|| {
                 let global = self.resolve_global(name_token.lexeme);
                 (OpCode::GET_GLOBAL, OpCode::SET_GLOBAL, global)
-            }
-        };
+            });
         if can_assign && self.try_match(TokenType::Equal) {
             self.expression();
             self.emit_bytes(set_op as u8, arg);
@@ -702,15 +732,61 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn resolve_local(&mut self, name: &str) -> Option<u8> {
-        for (i, l) in self
-            .compiler
-            .curr_fn_compiler
-            .locals
-            .iter()
-            .enumerate()
-            .rev()
-        {
+    fn resolve_upvalue(&mut self, name: &str, fn_compiler_index: usize) -> Option<u8> {
+        if fn_compiler_index >= self.compiler.fn_compilers.len() {
+            return None;
+        }
+        let parent_index = fn_compiler_index + 1;
+        let index = self.resolve_local(name, parent_index);
+        if let Some(index) = index {
+            self.set_captured(index, parent_index);
+            return Some(self.add_upvalue(index, true, fn_compiler_index));
+        }
+        let index = self.resolve_upvalue(name, parent_index)?;
+        Some(self.add_upvalue(index, false, fn_compiler_index))
+    }
+
+    fn set_captured(&mut self, index: u8, fn_compiler_index: usize) {
+        let num_compilers = self.compiler.fn_compilers.len();
+        let fn_compiler = match fn_compiler_index {
+            0 => &mut self.compiler.curr_fn_compiler,
+            n if n <= self.compiler.fn_compilers.len() => {
+                &mut self.compiler.fn_compilers[num_compilers - n]
+            }
+            _ => panic!("cannot add upvalue to function compiler out of range"),
+        };
+        fn_compiler.locals[index as usize].is_captured = true;
+    }
+
+    fn add_upvalue(&mut self, index: u8, is_local: bool, fn_compiler_index: usize) -> u8 {
+        let num_compilers = self.compiler.fn_compilers.len();
+        let fn_compiler = match fn_compiler_index {
+            0 => &mut self.compiler.curr_fn_compiler,
+            n if n <= self.compiler.fn_compilers.len() => {
+                &mut self.compiler.fn_compilers[num_compilers - n]
+            }
+            _ => panic!("cannot add upvalue to function compiler out of range"),
+        };
+        for (i, upvalue) in fn_compiler.upvalues.iter().enumerate() {
+            if upvalue.index == index && upvalue.is_local == is_local {
+                return i as u8;
+            }
+        }
+        let i = fn_compiler.upvalues.len() as u8;
+        fn_compiler.upvalues.push(UpValue { index, is_local });
+        fn_compiler.function.upvalue_count += 1;
+        i
+    }
+
+    fn resolve_local(&mut self, name: &str, fn_compiler_index: usize) -> Option<u8> {
+        let fn_compiler = match fn_compiler_index {
+            0 => &self.compiler.curr_fn_compiler,
+            n if n <= self.compiler.fn_compilers.len() => {
+                &self.compiler.fn_compilers[self.compiler.fn_compilers.len() - n]
+            }
+            _ => return None,
+        };
+        for (i, l) in fn_compiler.locals.iter().enumerate().rev() {
             if l.name == name {
                 if !l.initialized {
                     self.error("Can't read local variable in its own initializer.");

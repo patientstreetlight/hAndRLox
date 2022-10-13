@@ -1,4 +1,5 @@
 use crate::Chunk;
+use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
@@ -11,6 +12,37 @@ pub enum Value {
     // XXX Should probably be GC'd rather than RC'd
     Function(Rc<Function>),
     NativeFn(Rc<NativeFn>),
+    Closure(Rc<Closure>),
+}
+
+// UpValue invariants:
+// - a given local variable is captured by at most 1 UpValue.
+// - all closures which capture the same local variable do so
+//   through the same UpValue.
+
+pub type UpValueRef = Rc<RefCell<UpValue>>;
+
+#[derive(Debug)]
+pub enum UpValue {
+    Open(usize),
+    Closed(Value),
+}
+
+pub struct Closure {
+    pub function: Rc<Function>,
+    pub upvalues: Vec<UpValueRef>,
+}
+
+impl Closure {
+    pub fn new(function: Rc<Function>, upvalues: Vec<UpValueRef>) -> Rc<Closure> {
+        Rc::new(Closure { function, upvalues })
+    }
+}
+
+impl fmt::Debug for Closure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.function.fmt(f)
+    }
 }
 
 pub struct NativeFn {
@@ -28,6 +60,7 @@ pub struct Function {
     pub arity: u8,
     pub chunk: Chunk,
     pub name: Option<String>,
+    pub upvalue_count: u8,
 }
 
 impl Function {
@@ -36,6 +69,7 @@ impl Function {
             arity: 0,
             chunk: Chunk::new(),
             name: None,
+            upvalue_count: 0,
         }
     }
 }
@@ -61,6 +95,7 @@ impl fmt::Display for Value {
                 Some(name) => write!(f, "<fn {}>", name),
             },
             Self::NativeFn(function) => write!(f, "<native fn {}>", function.name),
+            Self::Closure(_closure) => write!(f, "<closure>"),
         }
     }
 }
