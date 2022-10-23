@@ -1,18 +1,18 @@
 use crate::Chunk;
 use std::cell::RefCell;
 use std::fmt;
+use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum Value {
     Num(f64),
     Bool(bool),
     Nil,
-    Str(Rc<String>),
-    // XXX Should probably be GC'd rather than RC'd
-    Function(Rc<Function>),
-    NativeFn(Rc<NativeFn>),
-    Closure(Rc<Closure>),
+    Str(Gc<String>),
+    Function(Gc<Function>),
+    NativeFn(Gc<NativeFn>),
+    Closure(Gc<Closure>),
 }
 
 // UpValue invariants:
@@ -29,14 +29,8 @@ pub enum UpValue {
 }
 
 pub struct Closure {
-    pub function: Rc<Function>,
+    pub function: Gc<Function>,
     pub upvalues: Vec<UpValueRef>,
-}
-
-impl Closure {
-    pub fn new(function: Rc<Function>, upvalues: Vec<UpValueRef>) -> Rc<Closure> {
-        Rc::new(Closure { function, upvalues })
-    }
 }
 
 impl fmt::Debug for Closure {
@@ -89,7 +83,7 @@ impl fmt::Display for Value {
             Self::Num(n) => write!(f, "{}", n),
             Self::Bool(b) => write!(f, "{}", b),
             Self::Nil => write!(f, "nil"),
-            Self::Str(s) => write!(f, "{}", s.as_ref()),
+            Self::Str(s) => s.fmt(f),
             Self::Function(function) => match &function.name {
                 None => write!(f, "<script>"),
                 Some(name) => write!(f, "<fn {}>", name),
@@ -106,11 +100,23 @@ impl Value {
             (Value::Num(a), Value::Num(b)) if a == b => true,
             (Value::Bool(a), Value::Bool(b)) if a == b => true,
             (Value::Nil, Value::Nil) => true,
-            (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::Str(a), Value::Str(b)) =>
+                a.ref_equals(*b) || str_equals(a, b),
+            (Value::Function(a), Value::Function(b)) =>
+                a.ref_equals(*b),
+            (Value::Closure(a), Value::Closure(b)) =>
+                a.ref_equals(*b),
+            (Value::NativeFn(a), Value::NativeFn(b)) =>
+                a.ref_equals(*b),
             _ => false,
         };
         Value::Bool(b)
     }
+}
+
+#[inline]
+fn str_equals(a: &str, b: &str) -> bool {
+    a == b
 }
 
 #[inline]
@@ -148,14 +154,15 @@ pub fn is_falsey(v: Value) -> Value {
 }
 
 #[inline]
-pub fn add(a: Value, b: Value) -> Value {
+pub fn add(a: Value, b: Value, allocator: &mut GcAllocator) -> Value {
     match (a, b) {
         (Value::Num(a), Value::Num(b)) => Value::Num(a + b),
         (Value::Str(s1), Value::Str(s2)) => {
-            let mut s = String::new();
-            s.push_str(s1.as_ref());
-            s.push_str(s2.as_ref());
-            Value::Str(Rc::new(s))
+            let mut s = String::with_capacity(s1.len() + s2.len());
+            s.push_str(s1.as_str());
+            s.push_str(s2.as_str());
+            let s = allocator.alloc_constant(s);
+            Value::Str(s)
         }
         _ => panic!("Can only add numbers and strings"),
     }
@@ -184,3 +191,85 @@ pub fn divide(a: Value, b: Value) -> Value {
         _ => panic!("Can only divide numbers"),
     }
 }
+
+#[derive(Debug)]
+pub struct Gc<T> {
+    obj: *mut T,
+}
+
+impl<T> Gc<T> {
+    fn ref_equals(self, rhs: Gc<T>) -> bool {
+        std::ptr::eq(self.obj, rhs.obj)
+    }
+}
+
+impl<T> Deref for Gc<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            &*self.obj
+        }
+    }
+}
+
+impl<T> DerefMut for Gc<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe {
+            &mut *self.obj
+        }
+    }
+}
+
+// Can't auto-derive Copy and Clone for Gc<T> since the auto-derive
+// only implements Copy/Clone when T implements Copy/Clone, but that
+// restriction is not necessary for Gc<T> since it's just copying
+// raw pointers.
+impl<T> Clone for Gc<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for Gc<T> {}
+
+pub struct GcAllocator {
+    // TODO: track all created objects which have not yet been freed.
+}
+
+impl GcAllocator {
+    pub fn new() -> GcAllocator {
+        GcAllocator {
+        }
+    }
+
+    pub fn alloc_constant<T>(&mut self, val: T) -> Gc<T> {
+        let ptr = Box::leak(Box::new(val));
+        let ptr = ptr as *mut T;
+        Gc {
+            obj: ptr,
+        }
+    }
+
+    pub fn alloc<T, I>(&mut self, val: T, roots: I) -> Gc<T>
+    where
+        I: IntoIterator<Item=Value>
+    {
+        // TODO: conditionally run a collection.
+        self.alloc_constant(val)
+    }
+
+    fn collect<I>(&mut self, roots: I)
+    where
+        I: IntoIterator<Item=Value>
+    {
+        // Roots are:
+        // - all Gc values on the stack
+        // - all Gc global variables
+        // - closures in call stack frames
+        // - the open upvalue list would be as well if they were GC'd objects
+        todo!();
+    }
+}
+
+// TODO: Dropping GcAllocator should free all outstanding objects.

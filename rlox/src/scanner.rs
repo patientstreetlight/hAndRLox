@@ -231,7 +231,7 @@ impl<'a> Scanner<'a> {
 
     fn mk_token(&mut self, token_type: TokenType) -> Token<'a> {
         Token {
-            token_type: token_type,
+            token_type,
             lexeme: &self.start[0..self.current_token_len],
             line: self.line,
         }
@@ -453,7 +453,7 @@ mod tests {
         for (lexeme, expected_type) in expected_tokens {
             let tok = scanner.scan_token();
             let expected = Token {
-                lexeme: lexeme,
+                lexeme,
                 line: 1,
                 token_type: expected_type,
             };

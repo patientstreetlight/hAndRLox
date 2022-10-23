@@ -2,11 +2,11 @@ use crate::chunk::{Chunk, OpCode};
 use crate::scanner::{Scanner, Token, TokenType};
 use crate::value::Function;
 use crate::value::Value;
+use crate::value::GcAllocator;
 use std::collections::HashMap;
-use std::rc::Rc;
 
-pub fn compile(source: &str, globals: HashMap<String, u8>) -> Option<Function> {
-    let mut parser = Parser::new(source, globals);
+pub fn compile(source: &str, globals: HashMap<String, u8>, allocator: &mut GcAllocator) -> Option<Function> {
+    let mut parser = Parser::new(source, globals, allocator);
     while !parser.try_match(TokenType::EOF) {
         parser.declaration();
     }
@@ -36,6 +36,7 @@ struct Compiler<'a> {
     curr_fn_compiler: FnCompiler<'a>,
     fn_compilers: Vec<FnCompiler<'a>>,
     globals: HashMap<String, u8>,
+    allocator: &'a mut GcAllocator,
 }
 
 struct FnCompiler<'a> {
@@ -185,7 +186,7 @@ fn get_prefix_parser<'a>(token_type: TokenType) -> Option<fn(&mut Parser<'a>, bo
 }
 
 impl<'a> Parser<'a> {
-    fn new(source: &'a str, globals: HashMap<String, u8>) -> Parser<'a> {
+    fn new(source: &'a str, globals: HashMap<String, u8>, allocator: &'a mut GcAllocator) -> Parser<'a> {
         let mut scanner = Scanner::new(source);
         let first_token = scanner.scan_token();
         let fn_compiler = FnCompiler::new(FunctionType::Script);
@@ -193,6 +194,7 @@ impl<'a> Parser<'a> {
             curr_fn_compiler: fn_compiler,
             fn_compilers: Vec::new(),
             globals,
+            allocator,
         };
         Parser {
             previous: first_token,
@@ -307,7 +309,8 @@ impl<'a> Parser<'a> {
         self.block();
         let upvalues = self.compiler.curr_fn_compiler.upvalues.clone();
         let function = self.end_fn_compiler();
-        let function = Value::Function(Rc::new(function));
+        let function = self.compiler.allocator.alloc_constant(function);
+        let function = Value::Function(function);
         let function_constant = self.mk_constant(function);
         self.emit_bytes(OpCode::CLOSURE as u8, function_constant);
         for upvalue in upvalues {
@@ -676,8 +679,8 @@ impl<'a> Parser<'a> {
         let lexeme = self.previous.lexeme;
         let stripped_lexeme = &lexeme[1..lexeme.len() - 1];
         let s = String::from(stripped_lexeme);
-        let rc_s = Rc::new(s);
-        let lox_s = Value::Str(rc_s);
+        let s = self.compiler.allocator.alloc_constant(s);
+        let lox_s = Value::Str(s);
         self.emit_constant(lox_s);
     }
 
