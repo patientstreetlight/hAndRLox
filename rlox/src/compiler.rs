@@ -1,11 +1,15 @@
 use crate::chunk::{Chunk, OpCode};
 use crate::scanner::{Scanner, Token, TokenType};
 use crate::value::Function;
-use crate::value::Value;
 use crate::value::GcAllocator;
+use crate::value::Value;
 use std::collections::HashMap;
 
-pub fn compile(source: &str, globals: HashMap<String, u8>, allocator: &mut GcAllocator) -> Option<Function> {
+pub fn compile(
+    source: &str,
+    globals: HashMap<String, u8>,
+    allocator: &mut GcAllocator,
+) -> Option<Function> {
     let mut parser = Parser::new(source, globals, allocator);
     while !parser.try_match(TokenType::EOF) {
         parser.declaration();
@@ -107,65 +111,24 @@ impl Precedence {
     }
 }
 
-struct BinaryOp<'a> {
-    precedence: Precedence,
-    parser: fn(&mut Parser<'a>),
-}
+type BinaryOp<'a> = (Precedence, fn(&mut Parser<'a>, bool));
 
 fn get_infix_parser<'a>(token_type: TokenType) -> Option<BinaryOp<'a>> {
     match token_type {
-        TokenType::Minus => Some(BinaryOp {
-            precedence: Precedence::Term,
-            parser: Parser::binary,
-        }),
-        TokenType::Plus => Some(BinaryOp {
-            precedence: Precedence::Term,
-            parser: Parser::binary,
-        }),
-        TokenType::Star => Some(BinaryOp {
-            precedence: Precedence::Factor,
-            parser: Parser::binary,
-        }),
-        TokenType::Slash => Some(BinaryOp {
-            precedence: Precedence::Factor,
-            parser: Parser::binary,
-        }),
-        TokenType::BangEqual => Some(BinaryOp {
-            precedence: Precedence::Equality,
-            parser: Parser::binary,
-        }),
-        TokenType::EqualEqual => Some(BinaryOp {
-            precedence: Precedence::Equality,
-            parser: Parser::binary,
-        }),
-        TokenType::Greater => Some(BinaryOp {
-            precedence: Precedence::Comparison,
-            parser: Parser::binary,
-        }),
-        TokenType::GreaterEqual => Some(BinaryOp {
-            precedence: Precedence::Comparison,
-            parser: Parser::binary,
-        }),
-        TokenType::Less => Some(BinaryOp {
-            precedence: Precedence::Comparison,
-            parser: Parser::binary,
-        }),
-        TokenType::LessEqual => Some(BinaryOp {
-            precedence: Precedence::Comparison,
-            parser: Parser::binary,
-        }),
-        TokenType::And => Some(BinaryOp {
-            precedence: Precedence::And,
-            parser: Parser::and,
-        }),
-        TokenType::Or => Some(BinaryOp {
-            precedence: Precedence::Or,
-            parser: Parser::or,
-        }),
-        TokenType::LeftParen => Some(BinaryOp {
-            precedence: Precedence::Call,
-            parser: Parser::call,
-        }),
+        TokenType::Minus => Some((Precedence::Term, Parser::binary)),
+        TokenType::Plus => Some((Precedence::Term, Parser::binary)),
+        TokenType::Star => Some((Precedence::Factor, Parser::binary)),
+        TokenType::Slash => Some((Precedence::Factor, Parser::binary)),
+        TokenType::BangEqual => Some((Precedence::Equality, Parser::binary)),
+        TokenType::EqualEqual => Some((Precedence::Equality, Parser::binary)),
+        TokenType::Greater => Some((Precedence::Comparison, Parser::binary)),
+        TokenType::GreaterEqual => Some((Precedence::Comparison, Parser::binary)),
+        TokenType::Less => Some((Precedence::Comparison, Parser::binary)),
+        TokenType::LessEqual => Some((Precedence::Comparison, Parser::binary)),
+        TokenType::And => Some((Precedence::And, Parser::and)),
+        TokenType::Or => Some((Precedence::Or, Parser::or)),
+        TokenType::LeftParen => Some((Precedence::Call, Parser::call)),
+        TokenType::Dot => Some((Precedence::Call, Parser::dot)),
         _ => None,
     }
 }
@@ -186,7 +149,11 @@ fn get_prefix_parser<'a>(token_type: TokenType) -> Option<fn(&mut Parser<'a>, bo
 }
 
 impl<'a> Parser<'a> {
-    fn new(source: &'a str, globals: HashMap<String, u8>, allocator: &'a mut GcAllocator) -> Parser<'a> {
+    fn new(
+        source: &'a str,
+        globals: HashMap<String, u8>,
+        allocator: &'a mut GcAllocator,
+    ) -> Parser<'a> {
         let mut scanner = Scanner::new(source);
         let first_token = scanner.scan_token();
         let fn_compiler = FnCompiler::new(FunctionType::Script);
@@ -236,9 +203,20 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn call(&mut self) {
+    fn call(&mut self, _can_assign: bool) {
         let arg_count = self.argument_list();
         self.emit_bytes(OpCode::CALL as u8, arg_count);
+    }
+
+    fn dot(&mut self, can_assign: bool) {
+        self.consume(TokenType::Identifier, "Expect property name after '.'.");
+        let name = self.identifier_constant(self.previous);
+        if can_assign && self.try_match(TokenType::Equal) {
+            self.expression();
+            self.emit_bytes(OpCode::SET_PROPERTY as u8, name);
+        } else {
+            self.emit_bytes(OpCode::GET_PROPERTY as u8, name);
+        }
     }
 
     fn argument_list(&mut self) -> u8 {
@@ -268,12 +246,30 @@ impl<'a> Parser<'a> {
             self.fn_declaration();
         } else if self.try_match(TokenType::Var) {
             self.var_declaration();
+        } else if self.try_match(TokenType::Class) {
+            self.class_declaration();
         } else {
             self.statement();
         }
         if self.panic_mode {
             self.synchronize();
         }
+    }
+
+    fn class_declaration(&mut self) {
+        let name_var = self.parse_variable();
+        let name_constant = self.identifier_constant(self.previous);
+        self.emit_bytes(OpCode::CLASS as u8, name_constant);
+        self.define_variable(name_var);
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
+        self.consume(TokenType::RightBrace, "Expect '}' after class body.");
+    }
+
+    fn identifier_constant(&mut self, token: Token) -> u8 {
+        let s = token.lexeme.to_string();
+        let s = self.compiler.allocator.alloc_constant(s);
+        let s = Value::Str(s);
+        self.mk_constant(s)
     }
 
     fn fn_declaration(&mut self) {
@@ -333,6 +329,8 @@ impl<'a> Parser<'a> {
         self.define_variable(global);
     }
 
+    /// At top-level, emits code to define a global variable.
+    /// Otherwise, marks variable as initialized and ready for use.
     fn define_variable(&mut self, idx: u8) {
         if !self.is_top_level() {
             self.mark_initialized();
@@ -349,19 +347,29 @@ impl<'a> Parser<'a> {
         self.compiler.curr_fn_compiler.locals[num_locals - 1].initialized = true;
     }
 
-    // If at top level, resolves the global variable name and returns its handle.
-    // Otherwise, adds local variable to locals (i.e. declares it) and returns 0.
+    /// Parses a single Identifier token.
+    /// If at top level, resolves the global variable name and returns its handle.
+    /// Otherwise, adds local variable to locals (i.e. "declares" it) and returns 0.
+    /// In either case, self.previous is left populated with the parsed identifier
+    /// lexeme.  A call to parse_variable() should correspond to both:
+    /// 1. bytecode which evaluates an expression, with a stack-effect of 1
+    /// 2. a call to define_variable(global), where global is the value returned
+    ///    by parse_variable().
     fn parse_variable(&mut self) -> u8 {
         self.consume(TokenType::Identifier, "Expected identifier");
         self.declare_variable();
         if !self.is_top_level() {
-            // XXX Is this right?
             return 0;
         }
         let var_name = self.previous.lexeme;
         self.resolve_global(var_name)
     }
 
+    /// Declares that the current stack location will hold a local variable whose
+    /// name has just been parsed and is sitting in self.previous. Fails
+    /// if there is already a matching variable name in the current scope.  This has no
+    /// effect in the top-level scope where variables are declared and resolved
+    /// dynamically.
     fn declare_variable(&mut self) {
         if self.is_top_level() {
             return;
@@ -815,10 +823,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn binary(&mut self) {
+    fn binary(&mut self, _can_assign: bool) {
         let token_type = self.previous.token_type;
-        let binary_op = get_infix_parser(token_type).unwrap();
-        let rhs_precedence = binary_op.precedence.next_highest();
+        let (precedence, _) = get_infix_parser(token_type).unwrap();
+        let rhs_precedence = precedence.next_highest();
         self.parse_precedence(rhs_precedence);
         match token_type {
             TokenType::Minus => self.emit_byte(OpCode::SUBTRACT as u8),
@@ -835,14 +843,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn and(&mut self) {
+    fn and(&mut self, _can_assign: bool) {
         let end_jump = self.emit_jump(OpCode::JUMP_IF_FALSE);
         self.emit_byte(OpCode::POP as u8);
         self.parse_precedence(Precedence::And);
         self.patch_jump(end_jump);
     }
 
-    fn or(&mut self) {
+    fn or(&mut self, _can_assign: bool) {
         let continue_jump = self.emit_jump(OpCode::JUMP_IF_FALSE);
         // lhs was true
         let end_jump = self.emit_jump(OpCode::JUMP);
@@ -874,9 +882,9 @@ impl<'a> Parser<'a> {
         }
         loop {
             match get_infix_parser(self.current.token_type) {
-                Some(binary_op) if binary_op.precedence >= precedence => {
+                Some((op_precedence, parser)) if op_precedence >= precedence => {
                     self.advance();
-                    (binary_op.parser)(self);
+                    parser(self, can_assign);
                 }
                 _ => break,
             }

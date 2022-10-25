@@ -1,5 +1,6 @@
 use crate::Chunk;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
@@ -13,6 +14,50 @@ pub enum Value {
     Function(Gc<Function>),
     NativeFn(Gc<NativeFn>),
     Closure(Gc<Closure>),
+    Class(Gc<Class>),
+    Instance(Gc<Instance>),
+}
+
+pub struct Instance {
+    pub class: Gc<Class>,
+    // TODO: will the keys by String, or Gc<String>?
+    fields: HashMap<String, Value>,
+}
+
+impl Instance {
+    pub fn new(class: Gc<Class>) -> Instance {
+        Instance {
+            class,
+            fields: HashMap::new(),
+        }
+    }
+
+    pub fn set_property(&mut self, property: &str, val: Value) {
+        self.fields.insert(property.to_owned(), val);
+    }
+
+    pub fn get_property(&self, property: &str) -> Value {
+        *self.fields.get(property).expect("undefined property")
+    }
+}
+
+impl fmt::Debug for Instance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Instance")
+            .field("class", &self.class)
+            .field("fields", &self.fields)
+            .finish()
+    }
+}
+
+pub struct Class {
+    pub name: Gc<String>,
+}
+
+impl core::fmt::Debug for Class {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", &*self.name)
+    }
 }
 
 // UpValue invariants:
@@ -90,6 +135,8 @@ impl fmt::Display for Value {
             },
             Self::NativeFn(function) => write!(f, "<native fn {}>", function.name),
             Self::Closure(_closure) => write!(f, "<closure>"),
+            Self::Class(class) => write!(f, "{}", &*class.name),
+            Self::Instance(instance) => write!(f, "<{} instance>", &*instance.class.name),
         }
     }
 }
@@ -100,14 +147,10 @@ impl Value {
             (Value::Num(a), Value::Num(b)) if a == b => true,
             (Value::Bool(a), Value::Bool(b)) if a == b => true,
             (Value::Nil, Value::Nil) => true,
-            (Value::Str(a), Value::Str(b)) =>
-                a.ref_equals(*b) || str_equals(a, b),
-            (Value::Function(a), Value::Function(b)) =>
-                a.ref_equals(*b),
-            (Value::Closure(a), Value::Closure(b)) =>
-                a.ref_equals(*b),
-            (Value::NativeFn(a), Value::NativeFn(b)) =>
-                a.ref_equals(*b),
+            (Value::Str(a), Value::Str(b)) => a.ref_equals(*b) || str_equals(a, b),
+            (Value::Function(a), Value::Function(b)) => a.ref_equals(*b),
+            (Value::Closure(a), Value::Closure(b)) => a.ref_equals(*b),
+            (Value::NativeFn(a), Value::NativeFn(b)) => a.ref_equals(*b),
             _ => false,
         };
         Value::Bool(b)
@@ -207,17 +250,13 @@ impl<T> Deref for Gc<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe {
-            &*self.obj
-        }
+        unsafe { &*self.obj }
     }
 }
 
 impl<T> DerefMut for Gc<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe {
-            &mut *self.obj
-        }
+        unsafe { &mut *self.obj }
     }
 }
 
@@ -239,21 +278,18 @@ pub struct GcAllocator {
 
 impl GcAllocator {
     pub fn new() -> GcAllocator {
-        GcAllocator {
-        }
+        GcAllocator {}
     }
 
     pub fn alloc_constant<T>(&mut self, val: T) -> Gc<T> {
         let ptr = Box::leak(Box::new(val));
         let ptr = ptr as *mut T;
-        Gc {
-            obj: ptr,
-        }
+        Gc { obj: ptr }
     }
 
     pub fn alloc<T, I>(&mut self, val: T, roots: I) -> Gc<T>
     where
-        I: IntoIterator<Item=Value>
+        I: IntoIterator<Item = Value>,
     {
         // TODO: conditionally run a collection.
         self.alloc_constant(val)
@@ -261,7 +297,7 @@ impl GcAllocator {
 
     fn collect<I>(&mut self, roots: I)
     where
-        I: IntoIterator<Item=Value>
+        I: IntoIterator<Item = Value>,
     {
         // Roots are:
         // - all Gc values on the stack

@@ -4,6 +4,7 @@ use crate::native::ALL_NATIVE_FNS;
 use crate::value::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::rc::Rc;
 
 pub struct VM {
@@ -69,7 +70,8 @@ impl VM {
             match opcode {
                 OpCode::CONSTANT => {
                     let constant_index = self.read_byte();
-                    let constant = self.top_frame.closure.function.chunk.constants[constant_index as usize];
+                    let constant =
+                        self.top_frame.closure.function.chunk.constants[constant_index as usize];
                     self.push(constant);
                 }
                 OpCode::RETURN => {
@@ -220,6 +222,15 @@ impl VM {
                             }
                             self.push(ret_val);
                         }
+                        Value::Class(class) => {
+                            if num_args > 0 {
+                                panic!("Not ready for args to constructors yet");
+                            }
+                            let instance = Instance::new(class);
+                            let instance = self.allocator.alloc_constant(instance);
+                            let instance = Value::Instance(instance);
+                            self.stack[base_pointer] = instance;
+                        }
                         _ => panic!("{f} is not a function"),
                     }
                 }
@@ -295,7 +306,46 @@ impl VM {
                         }
                     };
                 }
+                OpCode::CLASS => {
+                    let name = self.read_string_constant();
+                    let class = Class { name };
+                    let class = self.allocator.alloc_constant(class);
+                    let class = Value::Class(class);
+                    self.push(class);
+                }
+                OpCode::SET_PROPERTY => {
+                    let prop_name = self.read_string_constant();
+                    let val = self.pop();
+                    let obj = self.pop();
+                    if let Value::Instance(mut instance) = obj {
+                        instance.set_property(&prop_name, val);
+                        self.push(val);
+                    } else {
+                        panic!("Only instances have fields");
+                    }
+                }
+                OpCode::GET_PROPERTY => {
+                    let prop_name = self.read_string_constant();
+                    let obj = self.pop();
+                    if let Value::Instance(instance) = obj {
+                        let val = instance.get_property(&prop_name);
+                        self.push(val);
+                    } else {
+                        panic!("Only instances have fields");
+                    }
+                }
             }
+        }
+    }
+
+    // Corresponds to READ_STRING() macro in CI.
+    fn read_string_constant(&mut self) -> Gc<String> {
+        let index = self.read_byte() as usize;
+        let v = self.top_frame.closure.function.chunk.constants[index];
+        if let Value::Str(s) = v {
+            s
+        } else {
+            panic!("Expected string constant, got {:?}", v)
         }
     }
 
@@ -494,6 +544,24 @@ impl VM {
                     print_byte();
                 }
                 OpCode::CLOSE_UPVALUE => println!("CLOSE_UPVALUE"),
+                OpCode::CLASS => {
+                    println!("CLASS");
+                    let (_, &name_index) = chunk_iter.next().unwrap();
+                    let name = self.top_frame.closure.function.chunk.constants[name_index as usize];
+                    println!("  {name_index} ({name})");
+                }
+                OpCode::SET_PROPERTY => {
+                    println!("SET_PROPERTY");
+                    let (_, &name_index) = chunk_iter.next().unwrap();
+                    let name = self.top_frame.closure.function.chunk.constants[name_index as usize];
+                    println!("  {name_index} ({name})");
+                }
+                OpCode::GET_PROPERTY => {
+                    println!("GET_PROPERTY");
+                    let (_, &name_index) = chunk_iter.next().unwrap();
+                    let name = self.top_frame.closure.function.chunk.constants[name_index as usize];
+                    println!("  {name_index} ({name})");
+                }
             }
         }
     }

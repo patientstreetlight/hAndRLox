@@ -33,6 +33,9 @@ pub enum OpCode {
     GET_UPVALUE,
     SET_UPVALUE,
     CLOSE_UPVALUE,
+    CLASS,
+    SET_PROPERTY,
+    GET_PROPERTY,
 }
 
 impl TryFrom<u8> for OpCode {
@@ -69,6 +72,9 @@ impl TryFrom<u8> for OpCode {
             x if x == OpCode::GET_UPVALUE as u8 => Ok(OpCode::GET_UPVALUE),
             x if x == OpCode::SET_UPVALUE as u8 => Ok(OpCode::SET_UPVALUE),
             x if x == OpCode::CLOSE_UPVALUE as u8 => Ok(OpCode::CLOSE_UPVALUE),
+            x if x == OpCode::CLASS as u8 => Ok(OpCode::CLASS),
+            x if x == OpCode::GET_PROPERTY as u8 => Ok(OpCode::GET_PROPERTY),
+            x if x == OpCode::SET_PROPERTY as u8 => Ok(OpCode::SET_PROPERTY),
             _ => Err(()),
         }
     }
@@ -115,9 +121,4 @@ impl Chunk {
         self.constants.push(v);
         index
     }
-}
-
-pub struct ChunkIter<'a> {
-    byte_iter: std::slice::Iter<'a, u8>,
-    chunk: &'a Chunk,
 }

@@ -199,7 +199,7 @@ impl<'a> Scanner<'a> {
     }
 
     fn peek_next(&self) -> Option<char> {
-        self.rest_chars().skip(1).next()
+        self.rest_chars().nth(1)
     }
 
     fn try_match_equal(&mut self, if_match: TokenType, if_not_match: TokenType) -> Token<'a> {
