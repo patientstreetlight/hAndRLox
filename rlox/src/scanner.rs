@@ -256,17 +256,11 @@ impl<'a> Scanner<'a> {
 }
 
 fn is_alpha(c: char) -> bool {
-    match c {
-        'a'..='z' | 'A'..='Z' | '_' => true,
-        _ => false,
-    }
+    matches!(c, 'a'..='z' | 'A'..='Z' | '_')
 }
 
 fn is_digit(c: char) -> bool {
-    match c {
-        '0'..='9' => true,
-        _ => false,
-    }
+    matches!(c, '0'..='9')
 }
 
 #[cfg(test)]

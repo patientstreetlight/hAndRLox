@@ -16,6 +16,18 @@ pub enum Value {
     Closure(Gc<Closure>),
     Class(Gc<Class>),
     Instance(Gc<Instance>),
+    BoundMethod(Gc<BoundMethod>),
+}
+
+pub struct BoundMethod {
+    pub receiver: Value,
+    pub method: Gc<Closure>,
+}
+
+impl fmt::Debug for BoundMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.method.fmt(f)
+    }
 }
 
 pub struct Instance {
@@ -36,8 +48,8 @@ impl Instance {
         self.fields.insert(property.to_owned(), val);
     }
 
-    pub fn get_property(&self, property: &str) -> Value {
-        *self.fields.get(property).expect("undefined property")
+    pub fn get_property(&self, property: &str) -> Option<Value> {
+        self.fields.get(property).copied()
     }
 }
 
@@ -52,6 +64,7 @@ impl fmt::Debug for Instance {
 
 pub struct Class {
     pub name: Gc<String>,
+    pub methods: HashMap<String, Gc<Closure>>,
 }
 
 impl core::fmt::Debug for Class {
@@ -137,6 +150,7 @@ impl fmt::Display for Value {
             Self::Closure(_closure) => write!(f, "<closure>"),
             Self::Class(class) => write!(f, "{}", &*class.name),
             Self::Instance(instance) => write!(f, "<{} instance>", &*instance.class.name),
+            Self::BoundMethod(method) => Value::Function(method.method.function).fmt(f),
         }
     }
 }

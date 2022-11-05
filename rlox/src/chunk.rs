@@ -36,6 +36,8 @@ pub enum OpCode {
     CLASS,
     SET_PROPERTY,
     GET_PROPERTY,
+    METHOD,
+    INVOKE,
 }
 
 impl TryFrom<u8> for OpCode {
@@ -75,6 +77,8 @@ impl TryFrom<u8> for OpCode {
             x if x == OpCode::CLASS as u8 => Ok(OpCode::CLASS),
             x if x == OpCode::GET_PROPERTY as u8 => Ok(OpCode::GET_PROPERTY),
             x if x == OpCode::SET_PROPERTY as u8 => Ok(OpCode::SET_PROPERTY),
+            x if x == OpCode::METHOD as u8 => Ok(OpCode::METHOD),
+            x if x == OpCode::INVOKE as u8 => Ok(OpCode::INVOKE),
             _ => Err(()),
         }
     }

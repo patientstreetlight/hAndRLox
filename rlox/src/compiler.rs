@@ -34,13 +34,19 @@ struct UpValue {
 enum FunctionType {
     Function,
     Script,
+    Method,
+    Initializer,
 }
 
 struct Compiler<'a> {
     curr_fn_compiler: FnCompiler<'a>,
     fn_compilers: Vec<FnCompiler<'a>>,
+    class_compilers: Vec<ClassCompiler>,
     globals: HashMap<String, u8>,
     allocator: &'a mut GcAllocator,
+}
+
+struct ClassCompiler {
 }
 
 struct FnCompiler<'a> {
@@ -53,14 +59,20 @@ struct FnCompiler<'a> {
 
 impl<'a> FnCompiler<'a> {
     fn new(function_type: FunctionType) -> FnCompiler<'a> {
+        let name = match function_type {
+            FunctionType::Method | FunctionType::Initializer => "this",
+            _ => "",
+        };
         FnCompiler {
             function: Function::new(),
             function_type,
             // The bottom of the frame will always be the function object itself,
             // so it's unavailable for local variable use.  It won't interfere with any
             // actual variables since real variables cannot have an empty name.
+            // When a method is invoked, the bottom of the frame will be the receiver
+            // that the method was called on, aka "this".
             locals: vec![Local {
-                name: "",
+                name,
                 depth: 0,
                 initialized: true,
                 is_captured: false,
@@ -144,6 +156,7 @@ fn get_prefix_parser<'a>(token_type: TokenType) -> Option<fn(&mut Parser<'a>, bo
         TokenType::Bang => Some(Parser::unary),
         TokenType::String => Some(Parser::string),
         TokenType::Identifier => Some(Parser::variable),
+        TokenType::This => Some(Parser::this),
         _ => None,
     }
 }
@@ -160,6 +173,7 @@ impl<'a> Parser<'a> {
         let compiler = Compiler {
             curr_fn_compiler: fn_compiler,
             fn_compilers: Vec::new(),
+            class_compilers: Vec::new(),
             globals,
             allocator,
         };
@@ -180,9 +194,9 @@ impl<'a> Parser<'a> {
 
     // This roughly corresponds to initCompiler() in CI.
     // popped by end_fn_compiler()
-    fn push_new_fn_compiler(&mut self) {
+    fn push_new_fn_compiler(&mut self, function_type: FunctionType) {
         let name = self.previous.lexeme.to_string();
-        let mut fn_compiler = FnCompiler::new(FunctionType::Function);
+        let mut fn_compiler = FnCompiler::new(function_type);
         fn_compiler.function.name = Some(name);
         let prev_fn_compiler = std::mem::replace(&mut self.compiler.curr_fn_compiler, fn_compiler);
         self.compiler.fn_compilers.push(prev_fn_compiler);
@@ -259,12 +273,37 @@ impl<'a> Parser<'a> {
     fn class_declaration(&mut self) {
         let name_var = self.parse_variable();
         let name_constant = self.identifier_constant(self.previous);
+        let class_name = self.previous;
         self.emit_bytes(OpCode::CLASS as u8, name_constant);
         self.define_variable(name_var);
+        self.compiler.class_compilers.push(ClassCompiler {});
+        // Pushes the class onto the stack.  This is needed since the class may have been
+        // defined as a global variable, but it needs to be on the stack where it can
+        // be found by the OpCode::METHOD instructions.
+        self.named_variable(class_name, false);
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
+        while !self.check(TokenType::EOF) && !self.check(TokenType::RightBrace) {
+            self.method();
+        }
         self.consume(TokenType::RightBrace, "Expect '}' after class body.");
+        // Pops the class which was pushed above by named_variable().
+        self.emit_byte(OpCode::POP as u8);
+        self.compiler.class_compilers.pop();
     }
 
+    fn method(&mut self) {
+        self.consume(TokenType::Identifier, "Expect method name");
+        let method_type = match self.previous.lexeme {
+            "init" => FunctionType::Initializer,
+            _ => FunctionType::Method,
+        };
+        let constant = self.identifier_constant(self.previous);
+        self.function(method_type);
+        self.emit_bytes(OpCode::METHOD as u8, constant);
+    }
+
+    /// Creates a string constant from the lexeme of the given token and returns
+    /// the corresponding constant handle.
     fn identifier_constant(&mut self, token: Token) -> u8 {
         let s = token.lexeme.to_string();
         let s = self.compiler.allocator.alloc_constant(s);
@@ -275,14 +314,14 @@ impl<'a> Parser<'a> {
     fn fn_declaration(&mut self) {
         let global = self.parse_variable();
         self.mark_initialized();
-        self.function();
+        self.function(FunctionType::Function);
         self.define_variable(global);
     }
 
     // parser is sitting on the opening '(' after a function name.
     // Should emit code which leaves a new function on top of the stack.
-    fn function(&mut self) {
-        self.push_new_fn_compiler();
+    fn function(&mut self, function_type: FunctionType) {
+        self.push_new_fn_compiler(function_type);
         self.consume(TokenType::LeftParen, "Expect '(' after function name.");
         if !self.check(TokenType::RightParen) {
             loop {
@@ -446,6 +485,9 @@ impl<'a> Parser<'a> {
         if self.try_match(TokenType::Semicolon) {
             self.emit_return();
         } else {
+            if self.compiler.curr_fn_compiler.function_type == FunctionType::Initializer {
+                self.error("Can't return a value from an initializer");
+            }
             self.expression();
             self.consume(TokenType::Semicolon, "Expect ';' after return value");
             self.emit_byte(OpCode::RETURN as u8);
@@ -672,7 +714,11 @@ impl<'a> Parser<'a> {
     }
 
     fn emit_return(&mut self) {
-        self.emit_byte(OpCode::NIL as u8);
+        if self.compiler.curr_fn_compiler.function_type == FunctionType::Initializer {
+            self.emit_bytes(OpCode::GET_LOCAL as u8, 0);
+        } else {
+            self.emit_byte(OpCode::NIL as u8);
+        }
         self.emit_byte(OpCode::RETURN as u8);
     }
 
@@ -716,6 +762,14 @@ impl<'a> Parser<'a> {
             _ => panic!("bad unary operator type"),
         };
         self.emit_byte(op as u8);
+    }
+
+    fn this(&mut self, _can_assign: bool) {
+        if self.compiler.class_compilers.is_empty() {
+            self.error("Can't use 'this' outside of a class");
+            return;
+        }
+        self.variable(false);
     }
 
     fn variable(&mut self, can_assign: bool) {

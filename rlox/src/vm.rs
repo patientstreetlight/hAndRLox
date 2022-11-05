@@ -4,7 +4,6 @@ use crate::native::ALL_NATIVE_FNS;
 use crate::value::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::rc::Rc;
 
 pub struct VM {
@@ -195,44 +194,10 @@ impl VM {
                     self.top_frame.ip -= offset;
                 }
                 OpCode::CALL => {
-                    let num_args = self.read_byte() as usize;
-                    let base_pointer = self.stack.len() - 1 - num_args;
-                    let f = self.stack[base_pointer];
-                    match f {
-                        Value::Closure(closure) => {
-                            if closure.function.arity != num_args as u8 {
-                                panic!(
-                                    "Expected {} args but got {}",
-                                    closure.function.arity, num_args
-                                );
-                            }
-                            let new_frame = Frame {
-                                closure,
-                                base_pointer,
-                                ip: 0,
-                            };
-                            let old_frame = std::mem::replace(&mut self.top_frame, new_frame);
-                            self.frames.push(old_frame);
-                        }
-                        Value::NativeFn(native) => {
-                            let args = &mut self.stack[base_pointer + 1..];
-                            let ret_val = (native.function)(args);
-                            for _ in 0..num_args + 1 {
-                                self.stack.pop();
-                            }
-                            self.push(ret_val);
-                        }
-                        Value::Class(class) => {
-                            if num_args > 0 {
-                                panic!("Not ready for args to constructors yet");
-                            }
-                            let instance = Instance::new(class);
-                            let instance = self.allocator.alloc_constant(instance);
-                            let instance = Value::Instance(instance);
-                            self.stack[base_pointer] = instance;
-                        }
-                        _ => panic!("{f} is not a function"),
-                    }
+                    let num_args = self.read_byte();
+                    let base_pointer = self.stack.len() - 1 - (num_args as usize);
+                    let callee = self.stack[base_pointer];
+                    self.call_value(callee, num_args);
                 }
                 OpCode::CLOSURE => {
                     let f_idx = self.read_byte() as usize;
@@ -308,7 +273,10 @@ impl VM {
                 }
                 OpCode::CLASS => {
                     let name = self.read_string_constant();
-                    let class = Class { name };
+                    let class = Class {
+                        name,
+                        methods: HashMap::new(),
+                    };
                     let class = self.allocator.alloc_constant(class);
                     let class = Value::Class(class);
                     self.push(class);
@@ -327,15 +295,119 @@ impl VM {
                 OpCode::GET_PROPERTY => {
                     let prop_name = self.read_string_constant();
                     let obj = self.pop();
-                    if let Value::Instance(instance) = obj {
-                        let val = instance.get_property(&prop_name);
-                        self.push(val);
+                    if let Value::Instance(mut instance) = obj {
+                        if let Some(val) = instance.get_property(&prop_name) {
+                            self.push(val);
+                        } else {
+                            self.bind_method(obj, &mut instance.class, &prop_name);
+                        }
                     } else {
                         panic!("Only instances have fields");
                     }
                 }
+                OpCode::METHOD => {
+                    let method_name = self.read_string_constant();
+                    self.define_method(&method_name);
+                }
+                OpCode::INVOKE => {
+                    let method = self.read_string_constant();
+                    let arg_count = self.read_byte() as usize;
+                    let receiver = self.stack[self.stack.len() - arg_count - 1];
+                    let instance = match receiver {
+                        Value::Instance(instance) => instance,
+                        _ => panic!("Only instances have methods"),
+                    };
+                    if let Some(field) = instance.get_property(&method) {
+                        let frame_base = self.stack.len() - 1 - arg_count;
+                        self.stack[frame_base] = field;
+                        self.call_value(field, arg_count as u8);
+                    } else {
+                        self.invoke_from_class(instance.class, method, arg_count);
+                    }
+                }
             }
         }
+    }
+
+    fn call_value(&mut self, callee: Value, num_args: u8) {
+        let base_pointer = self.stack.len() - 1 - (num_args as usize);
+        match callee {
+            Value::Closure(closure) => {
+                self.call_closure(closure, num_args, base_pointer);
+            }
+            Value::NativeFn(native) => {
+                let args = &mut self.stack[base_pointer + 1..];
+                let ret_val = (native.function)(args);
+                for _ in 0..num_args + 1 {
+                    self.stack.pop();
+                }
+                self.push(ret_val);
+            }
+            Value::Class(class) => {
+                let instance = Instance::new(class);
+                let instance = self.allocator.alloc_constant(instance);
+                let instance = Value::Instance(instance);
+                self.stack[base_pointer] = instance;
+                if let Some(&init) = class.methods.get("init") {
+                    self.call_closure(init, num_args, base_pointer);
+                } else if num_args != 0 {
+                    panic!("Expected 0 arguments but got {num_args}");
+                }
+            }
+            Value::BoundMethod(bound_method) => {
+                self.stack[base_pointer] = bound_method.receiver;
+                let closure = bound_method.method;
+                self.call_closure(closure, num_args, base_pointer);
+            }
+            _ => panic!("{callee} is not a function"),
+        }
+    }
+
+    fn invoke_from_class(&mut self, class: Gc<Class>, method: Gc<String>, arg_count: usize) {
+        let base_pointer = self.stack.len() - 1 - arg_count;
+        let method = class.methods.get(&*method).expect("Undefined property");
+        self.call_closure(*method, arg_count as u8, base_pointer);
+    }
+
+    fn call_closure(&mut self, closure: Gc<Closure>, num_args: u8, base_pointer: usize) {
+        if closure.function.arity != num_args {
+            panic!(
+                "Expected {} args but got {}",
+                closure.function.arity, num_args
+            );
+        }
+        let new_frame = Frame {
+            closure,
+            base_pointer,
+            ip: 0,
+        };
+        let old_frame = std::mem::replace(&mut self.top_frame, new_frame);
+        self.frames.push(old_frame);
+    }
+
+    fn bind_method(&mut self, obj: Value, class: &mut Class, prop_name: &str) {
+        let method = *class.methods.get(prop_name).expect("Undefined property");
+        let bound_method = BoundMethod {
+            receiver: obj,
+            method,
+        };
+        let bound_method = self.allocator.alloc_constant(bound_method);
+        let bound_method = Value::BoundMethod(bound_method);
+        self.push(bound_method);
+    }
+
+    fn define_method(&mut self, method_name: &str) {
+        let method = self.pop();
+        let method = match method {
+            Value::Closure(c) => c,
+            _ => panic!("Not a method"),
+        };
+        let class = self.peek();
+        let mut class = match class {
+            Value::Class(c) => c,
+            _ => panic!("Not a class"),
+        };
+        class.methods.insert(method_name.to_string(), method);
     }
 
     // Corresponds to READ_STRING() macro in CI.
@@ -561,6 +633,20 @@ impl VM {
                     let (_, &name_index) = chunk_iter.next().unwrap();
                     let name = self.top_frame.closure.function.chunk.constants[name_index as usize];
                     println!("  {name_index} ({name})");
+                }
+                OpCode::METHOD => {
+                    println!("METHOD");
+                    let (_, &name_index) = chunk_iter.next().unwrap();
+                    let name = self.top_frame.closure.function.chunk.constants[name_index as usize];
+                    println!("  {name_index} ({name})");
+                }
+                OpCode::INVOKE => {
+                    println!("INVOKE");
+                    let (_, &name_index) = chunk_iter.next().unwrap();
+                    let name = self.top_frame.closure.function.chunk.constants[name_index as usize];
+                    let (_, &arg_count) = chunk_iter.next().unwrap();
+                    println!("  {name_index} ({name})");
+                    println!("  {arg_count}");
                 }
             }
         }
