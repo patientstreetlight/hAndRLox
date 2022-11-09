@@ -47,6 +47,7 @@ struct Compiler<'a> {
 }
 
 struct ClassCompiler {
+    has_superclass: bool,
 }
 
 struct FnCompiler<'a> {
@@ -157,6 +158,7 @@ fn get_prefix_parser<'a>(token_type: TokenType) -> Option<fn(&mut Parser<'a>, bo
         TokenType::String => Some(Parser::string),
         TokenType::Identifier => Some(Parser::variable),
         TokenType::This => Some(Parser::this),
+        TokenType::Super => Some(Parser::super_),
         _ => None,
     }
 }
@@ -273,10 +275,26 @@ impl<'a> Parser<'a> {
     fn class_declaration(&mut self) {
         let name_var = self.parse_variable();
         let name_constant = self.identifier_constant(self.previous);
-        let class_name = self.previous;
+        let class_name = self.previous.lexeme;
         self.emit_bytes(OpCode::CLASS as u8, name_constant);
         self.define_variable(name_var);
-        self.compiler.class_compilers.push(ClassCompiler {});
+        let mut has_superclass = false;
+        if self.try_match(TokenType::Less) {
+            has_superclass = true;
+            self.consume(TokenType::Identifier, "Expect superclass name.");
+            self.variable(false);
+            if class_name == self.previous.lexeme {
+                self.error("A class can't inherit from itself");
+            }
+            self.begin_scope();
+            self.add_local("super");
+            self.define_variable(0);
+            self.named_variable(class_name, false);
+            self.emit_byte(OpCode::INHERIT as u8);
+        }
+        self.compiler
+            .class_compilers
+            .push(ClassCompiler { has_superclass });
         // Pushes the class onto the stack.  This is needed since the class may have been
         // defined as a global variable, but it needs to be on the stack where it can
         // be found by the OpCode::METHOD instructions.
@@ -288,6 +306,9 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::RightBrace, "Expect '}' after class body.");
         // Pops the class which was pushed above by named_variable().
         self.emit_byte(OpCode::POP as u8);
+        if has_superclass {
+            self.end_scope();
+        }
         self.compiler.class_compilers.pop();
     }
 
@@ -772,12 +793,34 @@ impl<'a> Parser<'a> {
         self.variable(false);
     }
 
-    fn variable(&mut self, can_assign: bool) {
-        self.named_variable(self.previous, can_assign);
+    fn super_(&mut self, _can_assign: bool) {
+        if self.compiler.class_compilers.is_empty() {
+            self.error("Can't use 'super' outside of a class");
+        } else if !self.compiler.class_compilers[self.compiler.class_compilers.len() - 1]
+            .has_superclass
+        {
+            self.error("Can't use 'super' in a class with no superclass");
+        }
+        self.consume(TokenType::Dot, "Expect '.' after super");
+        self.consume(TokenType::Identifier, "Expect superclass method name");
+        let super_method_name = self.identifier_constant(self.previous);
+        self.named_variable("this", false);
+        if self.try_match(TokenType::LeftParen) {
+            let num_args = self.argument_list();
+            self.named_variable("super", false);
+            self.emit_bytes(OpCode::SUPER_INVOKE as u8, num_args);
+            self.emit_byte(num_args);
+        } else {
+            self.named_variable("super", false);
+            self.emit_bytes(OpCode::GET_SUPER as u8, super_method_name);
+        }
     }
 
-    fn named_variable(&mut self, name_token: Token, can_assign: bool) {
-        let name = name_token.lexeme;
+    fn variable(&mut self, can_assign: bool) {
+        self.named_variable(self.previous.lexeme, can_assign);
+    }
+
+    fn named_variable(&mut self, name: &str, can_assign: bool) {
         let (get_op, set_op, arg) = self
             .resolve_local(name, 0)
             .map(|local_index| (OpCode::GET_LOCAL, OpCode::SET_LOCAL, local_index))
@@ -786,7 +829,7 @@ impl<'a> Parser<'a> {
                     .map(|upvalue_index| (OpCode::GET_UPVALUE, OpCode::SET_UPVALUE, upvalue_index))
             })
             .unwrap_or_else(|| {
-                let global = self.resolve_global(name_token.lexeme);
+                let global = self.resolve_global(name);
                 (OpCode::GET_GLOBAL, OpCode::SET_GLOBAL, global)
             });
         if can_assign && self.try_match(TokenType::Equal) {

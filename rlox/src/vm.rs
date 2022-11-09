@@ -295,11 +295,11 @@ impl VM {
                 OpCode::GET_PROPERTY => {
                     let prop_name = self.read_string_constant();
                     let obj = self.pop();
-                    if let Value::Instance(mut instance) = obj {
+                    if let Value::Instance(instance) = obj {
                         if let Some(val) = instance.get_property(&prop_name) {
                             self.push(val);
                         } else {
-                            self.bind_method(obj, &mut instance.class, &prop_name);
+                            self.bind_method(obj, &instance.class, &prop_name);
                         }
                     } else {
                         panic!("Only instances have fields");
@@ -324,6 +324,37 @@ impl VM {
                     } else {
                         self.invoke_from_class(instance.class, method, arg_count);
                     }
+                }
+                OpCode::INHERIT => {
+                    let class = self.pop();
+                    let super_class = self.peek();
+                    let (mut class, super_class) = match (class, super_class) {
+                        (Value::Class(c), Value::Class(s)) => (c, s),
+                        _ => panic!("Expected class"),
+                    };
+                    for (method_name, method) in super_class.methods.iter() {
+                        class.methods.insert(method_name.clone(), *method);
+                    }
+                }
+                OpCode::GET_SUPER => {
+                    let method_name = self.read_string_constant();
+                    let superclass = self.pop();
+                    let superclass = match superclass {
+                        Value::Class(c) => c,
+                        _ => panic!("Expected class"),
+                    };
+                    let instance = self.pop();
+                    self.bind_method(instance, &superclass, &method_name);
+                }
+                OpCode::SUPER_INVOKE => {
+                    let method_name = self.read_string_constant();
+                    let arg_count = self.read_byte() as usize;
+                    let superclass = self.pop();
+                    let superclass = match superclass {
+                        Value::Class(c) => c,
+                        _ => panic!("Expected class"),
+                    };
+                    self.invoke_from_class(superclass, method_name, arg_count);
                 }
             }
         }
@@ -385,7 +416,7 @@ impl VM {
         self.frames.push(old_frame);
     }
 
-    fn bind_method(&mut self, obj: Value, class: &mut Class, prop_name: &str) {
+    fn bind_method(&mut self, obj: Value, class: &Class, prop_name: &str) {
         let method = *class.methods.get(prop_name).expect("Undefined property");
         let bound_method = BoundMethod {
             receiver: obj,
@@ -646,6 +677,23 @@ impl VM {
                     let name = self.top_frame.closure.function.chunk.constants[name_index as usize];
                     let (_, &arg_count) = chunk_iter.next().unwrap();
                     println!("  {name_index} ({name})");
+                    println!("  {arg_count}");
+                }
+                OpCode::INHERIT => {
+                    println!("INHERIT");
+                }
+                OpCode::GET_SUPER => {
+                    println!("GET_SUPER");
+                    let (_, &name_index) = chunk_iter.next().unwrap();
+                    let name = self.top_frame.closure.function.chunk.constants[name_index as usize];
+                    println!("  {name_index} ({name})");
+                }
+                OpCode::SUPER_INVOKE => {
+                    println!("SUPER_INVOKE");
+                    let (_, &name_index) = chunk_iter.next().unwrap();
+                    let name = self.top_frame.closure.function.chunk.constants[name_index as usize];
+                    println!("  {name_index} ({name})");
+                    let (_, &arg_count) = chunk_iter.next().unwrap();
                     println!("  {arg_count}");
                 }
             }

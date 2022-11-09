@@ -38,6 +38,9 @@ pub enum OpCode {
     GET_PROPERTY,
     METHOD,
     INVOKE,
+    INHERIT,
+    GET_SUPER,
+    SUPER_INVOKE,
 }
 
 impl TryFrom<u8> for OpCode {
@@ -79,6 +82,9 @@ impl TryFrom<u8> for OpCode {
             x if x == OpCode::SET_PROPERTY as u8 => Ok(OpCode::SET_PROPERTY),
             x if x == OpCode::METHOD as u8 => Ok(OpCode::METHOD),
             x if x == OpCode::INVOKE as u8 => Ok(OpCode::INVOKE),
+            x if x == OpCode::INHERIT as u8 => Ok(OpCode::INHERIT),
+            x if x == OpCode::GET_SUPER as u8 => Ok(OpCode::GET_SUPER),
+            x if x == OpCode::SUPER_INVOKE as u8 => Ok(OpCode::SUPER_INVOKE),
             _ => Err(()),
         }
     }
